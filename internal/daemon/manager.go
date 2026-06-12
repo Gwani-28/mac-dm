@@ -487,6 +487,13 @@ func (m *Manager) loadState() error {
 		}
 		jb.Speed = 0
 		jb.Segments = nil
+		// 완료 작업의 크기가 비어 있으면(예전 버그로 -1로 남은 것) 실제 파일에서 보정.
+		if jb.Status == api.StatusDone && jb.TotalBytes <= 0 {
+			if st, e := os.Stat(jb.Output); e == nil && !st.IsDir() {
+				jb.TotalBytes = st.Size()
+				jb.DoneBytes = st.Size()
+			}
+		}
 		j := &job{Job: jb}
 		m.jobs[jb.ID] = j
 		m.order = append(m.order, jb.ID)

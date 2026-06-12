@@ -11,10 +11,38 @@ import (
 	"bufio"
 	"context"
 	"fmt"
+	"os"
 	"os/exec"
 	"strconv"
 	"strings"
 )
+
+// 데몬이 GUI/launchd로 뜨면 PATH가 최소(/usr/bin:/bin)라 yt-dlp가 내부적으로
+// 부르는 ffmpeg·deno를 못 찾는다. 그러면 영상/음성을 따로 받고 병합을 못 해
+// 조각 파일만 남는다. 그래서 이 경로들을 PATH에 보강하고 ffmpeg 위치도 명시한다.
+var toolDirs = []string{"/opt/homebrew/bin", "/usr/local/bin", "/usr/bin"}
+
+func ffmpegDir() string {
+	for _, d := range toolDirs {
+		if fi, err := os.Stat(d + "/ffmpeg"); err == nil && !fi.IsDir() {
+			return d
+		}
+	}
+	return ""
+}
+
+// augmentedEnv는 현재 환경의 PATH 앞에 toolDirs를 끼워 yt-dlp가 ffmpeg·deno를
+// 확실히 찾게 한다.
+func augmentedEnv() []string {
+	env := os.Environ()
+	for i, kv := range env {
+		if strings.HasPrefix(kv, "PATH=") {
+			env[i] = "PATH=" + strings.Join(toolDirs, ":") + ":" + kv[len("PATH="):]
+			return env
+		}
+	}
+	return append(env, "PATH="+strings.Join(toolDirs, ":"))
+}
 
 // Path는 yt-dlp 실행 파일을 찾는다. 없으면 빈 문자열.
 func Path() string {
@@ -92,6 +120,10 @@ func Download(ctx context.Context, opt Options) (string, error) {
 		"--retries", "5",
 		"--fragment-retries", "10",
 	}
+	// ffmpeg 위치를 명시 — 데몬 PATH가 최소여도 영상+음성 병합이 되도록.
+	if fdir := ffmpegDir(); fdir != "" {
+		args = append(args, "--ffmpeg-location", fdir)
+	}
 	// 주의: 브라우저 헤더(Cookie·User-Agent)는 yt-dlp에 넘기지 않는다.
 	// yt-dlp는 유튜브용으로 자체 클라이언트를 위장하는데, 브라우저 UA를 강제로
 	// 덮으면 유튜브가 포맷 없는 응답을 줘서 다운로드가 깨진다(실측). 로그인 영상은
@@ -100,6 +132,7 @@ func Download(ctx context.Context, opt Options) (string, error) {
 	args = append(args, opt.URL)
 
 	cmd := exec.CommandContext(ctx, yt, args...)
+	cmd.Env = augmentedEnv() // ffmpeg·deno를 찾도록 PATH 보강
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		return "", err
@@ -127,7 +160,21 @@ func Download(ctx context.Context, opt Options) (string, error) {
 		}
 		return "", fmt.Errorf("yt-dlp 실패: %s", msg)
 	}
+	// yt-dlp의 after_move:filepath는 병합 실패 시에도 의도된 경로를 출력하므로,
+	// 실제 파일이 있는지 확인한다. 없으면 거짓 성공이 아니라 에러로.
+	if finalPath == "" || !fileExists(finalPath) {
+		hint := ""
+		if ffmpegDir() == "" {
+			hint = " (ffmpeg가 없어 영상·음성 병합을 못 했을 수 있습니다 — `brew install ffmpeg`)"
+		}
+		return "", fmt.Errorf("다운로드는 됐지만 최종 파일을 못 만들었습니다%s", hint)
+	}
 	return finalPath, nil
+}
+
+func fileExists(p string) bool {
+	fi, err := os.Stat(p)
+	return err == nil && !fi.IsDir()
 }
 
 // parseOutput은 yt-dlp stdout에서 진행률(DLPROG)과 최종 경로(절대경로 줄)를 가른다.
