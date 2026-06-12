@@ -1,0 +1,4 @@
+/dm
+*.part
+*.dm.json
+.DS_Store
