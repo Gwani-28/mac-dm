@@ -51,6 +51,20 @@ function eta(job) {
   return m > 0 ? `남은 시간 ${m}분 ${s}초` : `남은 시간 ${s}초`;
 }
 
+// IDM식 분할 커넥션별 진행 막대. active이고 구간이 2개 이상일 때만.
+function segmentsHTML(j) {
+  if (j.status !== "active" || !j.segments || j.segments.length < 2) return "";
+  const cells = j.segments.map((s, i) => {
+    const total = s.end - s.start + 1;
+    const p = total > 0 ? Math.min(100, (s.done / total) * 100) : 0;
+    return `<div class="seg" title="#${i + 1}: ${p.toFixed(1)}%">
+      <div class="seg-bar"><div style="width:${p}%"></div></div>
+      <span class="seg-pct">${p.toFixed(0)}%</span>
+    </div>`;
+  }).join("");
+  return `<div class="segs">${cells}</div>`;
+}
+
 function render() {
   // 카테고리 카운트
   const cnt = { "": jobs.length };
@@ -92,8 +106,10 @@ function render() {
         <span class="speed"></span>
         <span class="eta"></span>
         <span class="grow"></span>
+        <span class="conns"></span>
         <span class="job-actions"></span>
       </div>
+      ${segmentsHTML(j)}
       ${j.error ? '<div class="job-err"></div>' : ""}
     `;
     el.querySelector(".job-name").textContent = fileName(j);
@@ -101,6 +117,10 @@ function render() {
     el.querySelector(".size").textContent = sizeText;
     el.querySelector(".speed").textContent = speedText;
     el.querySelector(".eta").textContent = eta(j);
+    const connsEl = el.querySelector(".conns");
+    if (connsEl && j.segments && j.segments.length > 1) {
+      connsEl.textContent = `커넥션 ${j.segments.length}개`;
+    }
     if (j.error) el.querySelector(".job-err").textContent = "⚠ " + j.error;
 
     const actions = el.querySelector(".job-actions");
@@ -114,6 +134,7 @@ function render() {
     if (j.status === "active" || j.status === "queued") btn("일시정지", () => act(j.id, "pause"));
     if (j.status === "paused" || j.status === "failed" || j.status === "canceled") btn("재개", () => act(j.id, "resume"));
     if (j.status === "active" || j.status === "queued" || j.status === "paused") btn("취소", () => act(j.id, "cancel"), "danger");
+    if (j.status === "done") btn("폴더에서 보기", () => reveal(j.output));
     if (j.status === "done" || j.status === "failed" || j.status === "canceled" || j.status === "paused")
       btn("제거", () => removeJob(j.id), "danger");
 
@@ -132,6 +153,12 @@ async function removeJob(id) {
   try {
     await invoke("api_delete", { path: `/jobs/${id}` });
     await refresh();
+  } catch (e) { showBanner(String(e)); }
+}
+
+async function reveal(path) {
+  try {
+    await invoke("reveal", { path });
   } catch (e) { showBanner(String(e)); }
 }
 

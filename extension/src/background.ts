@@ -46,13 +46,31 @@ async function buildHeaders(url: string, referrer?: string): Promise<Record<stri
   return headers;
 }
 
-async function sendToDaemon(url: string, referrer?: string): Promise<HostResponse> {
+async function sendToDaemon(url: string, referrer?: string, kind?: string): Promise<HostResponse> {
   const headers = await buildHeaders(url, referrer);
   return (await chrome.runtime.sendNativeMessage(HOST, {
     type: "add",
     url,
     headers,
+    kind,
   })) as HostResponse;
+}
+
+// 유튜브 등 스트리밍 사이트 페이지인지 (이런 페이지는 일반 다운로드로 안 잡힌다 →
+// 페이지 URL을 통째로 yt-dlp에 넘긴다).
+const VIDEO_SITES = [
+  "youtube.com", "youtu.be", "vimeo.com", "dailymotion.com", "twitch.tv",
+  "tiktok.com", "instagram.com", "facebook.com", "fb.watch", "twitter.com",
+  "x.com", "soundcloud.com", "bilibili.com", "tv.naver.com", "chzzk.naver.com",
+];
+function isVideoSitePage(url?: string): boolean {
+  if (!url || !/^https?:/i.test(url)) return false;
+  try {
+    const h = new URL(url).hostname.replace(/^www\./, "");
+    return VIDEO_SITES.some((s) => h === s || h.endsWith("." + s));
+  } catch {
+    return false;
+  }
 }
 
 // ---- 다운로드 가로채기 ----
@@ -147,33 +165,47 @@ chrome.webRequest.onCompleted.addListener(
 );
 
 chrome.tabs.onRemoved.addListener((tabId) => tabManifests.delete(tabId));
-chrome.tabs.onUpdated.addListener((tabId, info) => {
+chrome.tabs.onUpdated.addListener((tabId, info, tab) => {
   if (info.status === "loading" && info.url) {
     tabManifests.delete(tabId);
     chrome.action.setBadgeText({ tabId, text: "" });
   }
+  // 유튜브 등 영상 사이트 페이지면 배지로 알린다 (.m3u8이 없어도)
+  const u = info.url || tab?.url;
+  if (isVideoSitePage(u)) {
+    chrome.action.setBadgeText({ tabId, text: "▶" });
+    chrome.action.setBadgeBackgroundColor({ tabId, color: "#0a84ff" });
+  }
 });
+
+// 현재 탭에서 받을 수 있는 영상 소스를 정한다:
+//  ① 영상 사이트 페이지(youtube 등)면 페이지 URL을 yt-dlp(kind=video)로
+//  ② 아니면 webRequest로 잡은 .m3u8 매니페스트를 ffmpeg로
+function streamSourceFor(tab?: chrome.tabs.Tab): { url: string; kind?: string; referrer?: string } | undefined {
+  if (isVideoSitePage(tab?.url)) return { url: tab!.url!, kind: "video", referrer: tab?.url };
+  const m = tab?.id != null ? tabManifests.get(tab.id) : undefined;
+  if (m) return { url: m.url, referrer: tab?.url };
+  return undefined;
+}
 
 // 팝업이 현재 탭의 감지된 스트림을 물어보거나 받기를 요청한다.
 chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   if (msg?.type === "get-stream") {
     chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
-      const t = tabs[0];
-      const m = t?.id != null ? tabManifests.get(t.id) : undefined;
-      sendResponse({ url: m?.url, pageUrl: t?.url });
+      const src = streamSourceFor(tabs[0]);
+      sendResponse({ url: src?.url, kind: src?.kind });
     });
     return true;
   }
   if (msg?.type === "capture-stream") {
     chrome.tabs.query({ active: true, currentWindow: true }, async (tabs) => {
-      const t = tabs[0];
-      const m = t?.id != null ? tabManifests.get(t.id) : undefined;
-      if (!m) {
-        sendResponse({ ok: false, message: "감지된 스트림이 없습니다" });
+      const src = streamSourceFor(tabs[0]);
+      if (!src) {
+        sendResponse({ ok: false, message: "감지된 영상이 없습니다" });
         return;
       }
       try {
-        const resp = await sendToDaemon(m.url, t?.url);
+        const resp = await sendToDaemon(src.url, src.referrer, src.kind);
         if (resp?.type !== "added") throw new Error(resp?.message || "호스트 응답 없음");
         notify(`Mac DM이 영상을 받는 중 (작업 ${resp.id})`);
         sendResponse({ ok: true, id: resp.id });

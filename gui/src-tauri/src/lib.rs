@@ -161,6 +161,20 @@ fn ensure_daemon() -> Result<(), String> {
     Err("데몬을 시작했지만 응답이 없습니다. ~/.mac-dm/daemon.log를 확인하세요".to_string())
 }
 
+/// 완료된 파일을 Finder에서 선택해 보여준다 (IDM의 "폴더에서 보기").
+#[tauri::command]
+fn reveal(path: String) -> Result<(), String> {
+    if path.is_empty() {
+        return Err("경로가 없습니다".to_string());
+    }
+    std::process::Command::new("/usr/bin/open")
+        .arg("-R")
+        .arg(&path)
+        .spawn()
+        .map_err(|e| format!("Finder 열기 실패: {e}"))?;
+    Ok(())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -168,7 +182,8 @@ pub fn run() {
             api_get,
             api_post,
             api_delete,
-            ensure_daemon
+            ensure_daemon,
+            reveal
         ])
         .run(tauri::generate_context!())
         .expect("Tauri 실행 실패");

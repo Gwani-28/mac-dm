@@ -21,6 +21,7 @@ type Job struct {
 	Output      string     `json:"output"` // 최종 저장 경로 (확정 전이면 폴더)
 	Connections int        `json:"connections"`
 	Category    string     `json:"category"`
+	Kind        string     `json:"kind,omitempty"` // "" / "video"(yt-dlp 경로)
 	Status      JobStatus  `json:"status"`
 	Error       string     `json:"error,omitempty"`
 	TotalBytes  int64      `json:"total_bytes"` // -1 = 아직 모름
@@ -28,8 +29,17 @@ type Job struct {
 	Speed       int64      `json:"speed"` // bytes/sec (active일 때만 의미)
 	AddedAt     time.Time  `json:"added_at"`
 	FinishedAt  *time.Time `json:"finished_at,omitempty"`
+	// 분할 구간별 진행 (active일 때만 채워짐). IDM식 커넥션별 퍼센트 표시용.
+	Segments []SegmentProgress `json:"segments,omitempty"`
 	// 요청 헤더 (쿠키 포함 가능 — jobs.json은 0600 권한). 이어받기에 필요해서 저장한다.
 	Headers map[string]string `json:"headers,omitempty"`
+}
+
+// SegmentProgress는 한 분할 구간의 진행 상태.
+type SegmentProgress struct {
+	Start int64 `json:"start"`
+	End   int64 `json:"end"`
+	Done  int64 `json:"done"`
 }
 
 type AddJobRequest struct {
@@ -37,6 +47,7 @@ type AddJobRequest struct {
 	Output      string            `json:"output,omitempty"`
 	Connections int               `json:"connections,omitempty"`
 	Headers     map[string]string `json:"headers,omitempty"` // 쿠키·Referer 등 (크롬 연동)
+	Kind        string            `json:"kind,omitempty"`    // "" / "video"(yt-dlp 강제)
 }
 
 // ConfigRequest의 nil 필드는 "변경 없음".

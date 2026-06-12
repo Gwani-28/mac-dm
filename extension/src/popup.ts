@@ -31,10 +31,13 @@ toggle.addEventListener("change", async () => {
   stateEl.textContent = toggle.checked ? "가로채기 켜짐" : "가로채기 꺼짐";
 });
 
-// HLS 스트림 감지 시 "영상 받기" 버튼 노출 (G5)
+// 영상 감지 시(유튜브 페이지 또는 HLS) "영상 받기" 버튼 노출
 const captureBtn = document.getElementById("capture") as HTMLButtonElement;
 chrome.runtime.sendMessage({ type: "get-stream" }, (resp) => {
-  if (resp?.url) captureBtn.style.display = "block";
+  if (resp?.url) {
+    captureBtn.style.display = "block";
+    captureBtn.textContent = resp.kind === "video" ? "▶ 이 영상 받기 (최고화질)" : "▶ 이 페이지의 영상 받기";
+  }
 });
 captureBtn.addEventListener("click", () => {
   captureBtn.disabled = true;

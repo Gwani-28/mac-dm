@@ -175,6 +175,19 @@ button.primary:hover { filter: brightness(1.1); }
 
 .job-bottom { display: flex; align-items: center; gap: 10px; color: var(--muted); font-size: 12px; }
 .job-bottom .grow { flex: 1; }
+.job-bottom .conns { font-size: 11px; color: var(--accent); font-weight: 600; }
+
+/* IDM식 분할 커넥션별 진행 막대 */
+.segs {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(76px, 1fr));
+  gap: 5px 8px;
+  margin: 9px 0 2px;
+}
+.seg { display: flex; align-items: center; gap: 5px; }
+.seg-bar { flex: 1; height: 5px; background: var(--bg); border-radius: 3px; overflow: hidden; }
+.seg-bar > div { height: 100%; background: var(--accent); border-radius: 3px; transition: width 0.3s; }
+.seg-pct { font-size: 10px; color: var(--muted); width: 28px; text-align: right; font-variant-numeric: tabular-nums; }
 .job-err { color: var(--red); font-size: 12px; margin-top: 6px; }
 .job-actions { display: flex; gap: 6px; }
 .job-actions button { padding: 4px 10px; font-size: 12px; }

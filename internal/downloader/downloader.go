@@ -32,6 +32,7 @@ import (
 	"mac-dm/internal/hls"
 	"mac-dm/internal/httpclient"
 	"mac-dm/internal/store"
+	"mac-dm/internal/ytdl"
 )
 
 // Options는 한 번의 다운로드 실행 설정.
@@ -40,6 +41,7 @@ type Options struct {
 	Output      string            // 비우면 서버/URL에서 파일명 결정, 현재 폴더에 저장
 	Connections int               // 분할 커넥션 수 (기본 8)
 	Headers     map[string]string // 요청에 실을 추가 헤더 (쿠키·Referer 등, 크롬 연동용)
+	Kind        string            // "" / "video"(yt-dlp 강제). 크롬 "영상 받기"가 설정
 	Progress    io.Writer         // 진행률 출력 대상. nil이면 출력 없음
 
 	// 아래는 데몬(G2)이 다운로드를 관제하기 위한 훅. CLI 직접 실행에선 전부 nil.
@@ -51,10 +53,41 @@ type Options struct {
 // IsHLS는 URL만으로 HLS 스트림(.m3u8)인지 판단한다. 데몬·CLI가 라우팅에 쓴다.
 func IsHLS(url string) bool { return hls.IsManifestURL(url) }
 
+// IsVideoSite는 yt-dlp로 보낼 스트리밍 사이트(유튜브 등)인지 판단한다.
+func IsVideoSite(url string) bool { return ytdl.IsVideoSite(url) }
+
 // Progress는 외부 관찰자(데몬)가 읽는 진행 카운터.
 type Progress struct {
 	Total atomic.Int64 // -1 = 아직 모름
 	Done  atomic.Int64
+
+	mu   sync.Mutex
+	segs []SegmentStat // 구간별 진행 스냅샷 (분할 다운로드일 때만)
+}
+
+// SegmentStat은 한 분할 구간의 스냅샷 (IDM식 커넥션별 진행 표시용).
+type SegmentStat struct {
+	Start int64 `json:"start"`
+	End   int64 `json:"end"`
+	Done  int64 `json:"done"`
+}
+
+func (p *Progress) setSegments(s []SegmentStat) {
+	p.mu.Lock()
+	p.segs = s
+	p.mu.Unlock()
+}
+
+// Segments는 마지막 스냅샷의 복사본을 돌려준다.
+func (p *Progress) Segments() []SegmentStat {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.segs == nil {
+		return nil
+	}
+	out := make([]SegmentStat, len(p.segs))
+	copy(out, p.segs)
+	return out
 }
 
 // Limiter는 n바이트 수신 허가가 날 때까지 블록한다.
@@ -75,6 +108,10 @@ func Run(ctx context.Context, opt Options) error {
 		opt.Connections = 8
 	}
 
+	// 유튜브 등 스트리밍 사이트 → yt-dlp 경로 (영상/음성 분리 + 암호화 주소).
+	if opt.Kind == "video" || ytdl.IsVideoSite(opt.URL) {
+		return runYTDL(ctx, opt)
+	}
 	// G5: HLS(.m3u8)는 세그먼트 스트림이라 Range 분할이 안 맞는다 → ffmpeg 경로로.
 	if IsHLS(opt.URL) {
 		return runHLS(ctx, opt)
@@ -346,16 +383,19 @@ func (d *download) newMeta() *store.Meta {
 	}
 }
 
-// startAux는 메타 주기 저장 + 진행률 표시 고루틴을 띄운다.
+// startAux는 메타 주기 저장 + 구간 스냅샷 + 진행률 표시 고루틴을 띄운다.
 func (d *download) startAux(ctx context.Context, meta *store.Meta) (stop func()) {
 	done := make(chan struct{})
 	var wg sync.WaitGroup
 	wg.Add(1)
+	d.snapshotSegments(meta) // 시작 즉시 한 번 (대기 중에도 분할 구성이 보이도록)
 	go func() {
 		defer wg.Done()
 		saveTick := time.NewTicker(metaSaveEvery)
 		defer saveTick.Stop()
-		printer := newProgressPrinter(d.opt.Progress, d.info.Size, &d.counters.Done)
+		snapTick := time.NewTicker(250 * time.Millisecond) // 구간 스냅샷·화면 갱신
+		defer snapTick.Stop()
+		printer := newProgressPrinter(d.opt.Progress, d.info.Size, d.counters)
 		defer printer.close()
 		for {
 			select {
@@ -365,12 +405,24 @@ func (d *download) startAux(ctx context.Context, meta *store.Meta) (stop func())
 				return
 			case <-saveTick.C:
 				meta.Save(d.metaPath) // 실패해도 다음 틱에 다시 시도
-			case <-printer.tick():
-				printer.print()
+			case <-snapTick.C:
+				d.snapshotSegments(meta)
+				printer.print() // writer가 nil이면 내부에서 무시
 			}
 		}
 	}()
 	return func() { close(done); wg.Wait() }
+}
+
+// snapshotSegments는 워커들이 갱신 중인 구간 진행을 원자적으로 읽어
+// 공유 Progress에 복사한다 (데몬·GUI가 분할별 퍼센트를 읽는 통로).
+func (d *download) snapshotSegments(meta *store.Meta) {
+	stats := make([]SegmentStat, len(meta.Segments))
+	for i := range meta.Segments {
+		s := &meta.Segments[i]
+		stats[i] = SegmentStat{Start: s.Start, End: s.End, Done: atomic.LoadInt64(&s.Done)}
+	}
+	d.counters.setSegments(stats)
 }
 
 // ---- 단일 커넥션 폴백 (Range 미지원 / 크기 불명) ----
@@ -423,7 +475,7 @@ func (d *download) startSingleProgress(ctx context.Context) (stop func()) {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		printer := newProgressPrinter(d.opt.Progress, d.info.Size, &d.counters.Done)
+		printer := newProgressPrinter(d.opt.Progress, d.info.Size, d.counters)
 		defer printer.close()
 		for {
 			select {

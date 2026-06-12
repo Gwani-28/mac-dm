@@ -12,6 +12,15 @@ mkdir -p "$BIN"
 ( cd "$ROOT" && "$GO" build -o "$BIN/dm" ./cmd/dm && "$GO" build -o "$BIN/dm-host" ./cmd/dm-host )
 echo "    설치됨: $BIN/dm, $BIN/dm-host"
 
+echo "==> 스트리밍 도구 확인 (ffmpeg, yt-dlp)"
+if command -v brew >/dev/null 2>&1; then
+  command -v ffmpeg >/dev/null 2>&1 || { echo "    ffmpeg 설치 중…"; brew install ffmpeg; }
+  command -v yt-dlp >/dev/null 2>&1 || { echo "    yt-dlp 설치 중…"; brew install yt-dlp; }
+  echo "    ffmpeg: $(command -v ffmpeg || echo 없음) / yt-dlp: $(command -v yt-dlp || echo 없음)"
+else
+  echo "    (brew 없음 — HLS·유튜브를 받으려면 ffmpeg와 yt-dlp를 직접 설치하세요)"
+fi
+
 echo "==> 크롬 네이티브 메시징 호스트 등록"
 "$BIN/dm" host install
 

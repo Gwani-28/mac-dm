@@ -24,6 +24,7 @@ const usage = `dm — 분할 다운로드 매니저
 ■ 데몬 경유 (큐·동시성·속도제한, 권장)
   dm add [-c 커넥션] [-o 경로] <URL>   작업 추가 (데몬이 없으면 자동 시작)
   dm list                              작업 목록·진행률
+  dm show <ID>                         분할 커넥션별 진행률 (IDM식)
   dm pause <ID>                        일시정지
   dm resume <ID>                       재개 (이어받기) / 실패·취소 작업 재시작
   dm cancel <ID>                       취소 (임시 파일 삭제)
@@ -59,6 +60,8 @@ func main() {
 		runAdd(os.Args[2:])
 	case "list", "ls":
 		runList()
+	case "show":
+		runShow(os.Args[2:])
 	case "pause", "resume", "cancel":
 		runJobAction(os.Args[1], os.Args[2:])
 	case "rm":
@@ -170,6 +173,70 @@ func runList() {
 	if st.SpeedLimit > 0 {
 		fmt.Printf("\n전체 속도 제한: %s/s, 동시 다운로드: %d개\n", formatBytes(st.SpeedLimit), st.MaxActive)
 	}
+}
+
+func runShow(args []string) {
+	if len(args) != 1 {
+		fmt.Fprintln(os.Stderr, "사용법: dm show <작업ID>")
+		os.Exit(2)
+	}
+	c := mustClient()
+	jobs, err := c.List()
+	if err != nil {
+		fatal(err)
+	}
+	var j *api.Job
+	for i := range jobs {
+		if jobs[i].ID == args[0] {
+			j = &jobs[i]
+			break
+		}
+	}
+	if j == nil {
+		fatal(fmt.Errorf("작업 %s 없음", args[0]))
+	}
+
+	fmt.Printf("작업 %s  [%s]\n", j.ID, statusKo(j.Status))
+	fmt.Printf("  URL : %s\n", j.URL)
+	fmt.Printf("  파일: %s\n", j.Output)
+	fmt.Printf("  전체: %s  속도 %s/s\n", progressCell(*j), speedNum(j.Speed))
+	if j.Error != "" {
+		fmt.Printf("  오류: %s\n", j.Error)
+	}
+	if len(j.Segments) == 0 {
+		conns := j.Connections
+		fmt.Printf("\n  (분할 커넥션 정보 없음 — 진행 중이 아니거나 단일 커넥션, 설정 %d개)\n", conns)
+		return
+	}
+	fmt.Printf("\n  커넥션 %d개:\n", len(j.Segments))
+	for i, s := range j.Segments {
+		total := s.End - s.Start + 1
+		pct := 0.0
+		if total > 0 {
+			pct = float64(s.Done) / float64(total) * 100
+		}
+		fmt.Printf("  #%-2d %s %5.1f%%  %s/%s\n",
+			i+1, miniBarCLI(pct), pct, formatBytes(s.Done), formatBytes(total))
+	}
+}
+
+func miniBarCLI(pct float64) string {
+	const width = 24
+	filled := int(pct / 100 * float64(width))
+	if filled > width {
+		filled = width
+	}
+	if filled < 0 {
+		filled = 0
+	}
+	return "[" + strings.Repeat("█", filled) + strings.Repeat("░", width-filled) + "]"
+}
+
+func speedNum(bps int64) string {
+	if bps <= 0 {
+		return "0B"
+	}
+	return formatBytes(bps)
 }
 
 func statusKo(s api.JobStatus) string {

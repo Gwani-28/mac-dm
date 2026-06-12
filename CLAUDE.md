@@ -74,6 +74,16 @@ cd "IDM MAC" && ./scripts/install.sh
 - **G5 (통과)**: HLS(.m3u8) 감지 + ffmpeg 머징(`internal/hls`). URL 라우팅으로 m3u8은 ffmpeg 경로,
   진행률은 재생시간 기준. 확장은 webRequest로 페이지의 .m3u8을 엿보고 팝업 "영상 받기" 버튼 제공.
 
+## 6-2. 후속 보강 (2026-06-13, 운영자 추가 요청)
+- **분할별 진행률 (IDM식)**: `downloader.Progress`가 구간별 스냅샷을 노출 → API `Job.segments` →
+  `dm show <ID>`가 커넥션별 막대·퍼센트, GUI가 미니 막대 그리드, `dm download` 직접 실행은 멀티라인 라이브.
+- **유튜브/스트리밍 (yt-dlp)**: 새 외부 도구 yt-dlp **운영자 승인하에 추가**(ffmpeg만으로는 유튜브 n-param
+  암호화를 못 풀어 불가). `internal/ytdl`이 감싸고, `IsVideoSite`(youtube·vimeo·twitch·tiktok 등) 또는
+  확장의 kind=video로 라우팅. 최고화질 영상+음성을 ffmpeg로 mp4 병합. 확장은 영상 사이트 페이지를 감지해
+  페이지 URL을 통째로 넘긴다(일반 가로채기로는 DASH가 안 잡힘). 검증: "Me at the zoo" 실제 다운로드 성공.
+- **GUI 폴더에서 보기**: 완료 작업에 Finder 표시(`open -R`) 버튼.
+- 의존성 정책: 외부 도구는 ffmpeg·yt-dlp 둘 뿐(둘 다 exec 호출, brew). Go 라이브러리 의존성은 여전히 0.
+
 ---
 
 ## 7. 레포 구조 (G1 기준)

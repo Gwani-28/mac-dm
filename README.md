@@ -26,8 +26,9 @@ cd "IDM MAC"
 ## CLI 사용법
 
 ```
-dm add <URL>             # 데몬에 다운로드 추가 (데몬 없으면 자동 시작)
+dm add <URL>             # 데몬에 다운로드 추가 (유튜브 URL이면 yt-dlp 자동 사용)
 dm list                  # 진행률·속도 보기
+dm show <ID>             # 분할 커넥션별 진행률 (IDM식 막대)
 dm pause / resume / cancel / rm <ID>
 dm limit 2M | off        # 전체 속도 제한
 dm concurrent 3          # 동시 다운로드 개수
@@ -45,13 +46,15 @@ dm host install          # 크롬 네이티브 메시징 호스트 등록
 | G3 | GUI (Tauri) | `gui/` |
 | G4 | 크롬 확장 + 네이티브 메시징 | `extension/`, `cmd/dm-host` |
 | G5 | HLS(m3u8) 감지 + ffmpeg 머징 | `internal/hls` |
+| 보강 | 분할별 진행률(IDM식) · 유튜브(yt-dlp) · 폴더에서 보기 | `internal/ytdl`, `dm show` |
 
 ## 기술 스택
 
-- 엔진·데몬·CLI·네이티브 호스트: **Go** (외부 의존성 0, 표준 라이브러리만)
+- 엔진·데몬·CLI·네이티브 호스트: **Go** (외부 라이브러리 의존성 0, 표준 라이브러리만)
 - GUI: **Tauri 2.x** (프런트는 순수 HTML/JS/CSS)
 - 크롬 확장: **TypeScript (Manifest V3)**
 - HLS 머징: 시스템 **ffmpeg** exec 호출
+- 스트리밍 사이트(유튜브 등): 시스템 **yt-dlp** exec 호출 (영상+음성 최고화질 → ffmpeg mp4 병합)
 
 ## 테스트
 

@@ -111,6 +111,11 @@ func (m *Manager) Add(req api.AddJobRequest) (api.Job, error) {
 	if out == "" {
 		out = m.outDir
 	}
+	category := api.Categorize(req.URL)
+	if req.Kind == "video" || downloader.IsVideoSite(req.URL) {
+		req.Kind = "video"
+		category = api.CategoryVideo
+	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.nextID++
@@ -119,7 +124,8 @@ func (m *Manager) Add(req api.AddJobRequest) (api.Job, error) {
 		URL:         req.URL,
 		Output:      out,
 		Connections: req.Connections,
-		Category:    api.Categorize(req.URL),
+		Category:    category,
+		Kind:        req.Kind,
 		Status:      api.StatusQueued,
 		TotalBytes:  -1,
 		AddedAt:     time.Now(),
@@ -320,6 +326,7 @@ func (m *Manager) runJob(ctx context.Context, j *job) {
 		Output:      j.Output,
 		Connections: j.Connections,
 		Headers:     j.Headers,
+		Kind:        j.Kind,
 		Counters:    j.counters,
 		Limiter:     m.limiter,
 		OnOutputResolved: func(p string) {
@@ -341,7 +348,11 @@ func (m *Manager) runJob(ctx context.Context, j *job) {
 		j.Status = api.StatusDone
 		now := time.Now()
 		j.FinishedAt = &now
-		if j.TotalBytes >= 0 {
+		// 최종 파일 크기로 확정 (스트리밍 영상은 진행 중 전체 크기를 모를 수 있다).
+		if st, e := os.Stat(j.Output); e == nil && !st.IsDir() {
+			j.TotalBytes = st.Size()
+			j.DoneBytes = st.Size()
+		} else if j.TotalBytes >= 0 {
 			j.DoneBytes = j.TotalBytes
 		}
 	case ctx.Err() != nil: // 우리가 멈춘 것 (일시정지/취소/셧다운)
@@ -359,6 +370,7 @@ func (m *Manager) runJob(ctx context.Context, j *job) {
 		j.Error = err.Error()
 	}
 	j.counters = nil
+	j.Segments = nil // 진행 중이 아니면 구간 막대를 비운다 (전체 %는 유지)
 	m.saveLocked()
 	m.scheduleLocked()
 }
@@ -371,6 +383,13 @@ func (m *Manager) refreshLocked(j *job) {
 	j.DoneBytes = j.counters.Done.Load()
 	if t := j.counters.Total.Load(); t != 0 {
 		j.TotalBytes = t
+	}
+	if segs := j.counters.Segments(); segs != nil {
+		out := make([]api.SegmentProgress, len(segs))
+		for i, s := range segs {
+			out[i] = api.SegmentProgress{Start: s.Start, End: s.End, Done: s.Done}
+		}
+		j.Segments = out
 	}
 }
 
@@ -467,6 +486,7 @@ func (m *Manager) loadState() error {
 			jb.Status = api.StatusQueued
 		}
 		jb.Speed = 0
+		jb.Segments = nil
 		j := &job{Job: jb}
 		m.jobs[jb.ID] = j
 		m.order = append(m.order, jb.ID)
