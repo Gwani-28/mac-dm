@@ -39,6 +39,22 @@ type Options struct {
 	Output      string    // 비우면 서버/URL에서 파일명 결정, 현재 폴더에 저장
 	Connections int       // 분할 커넥션 수 (기본 8)
 	Progress    io.Writer // 진행률 출력 대상. nil이면 출력 없음
+
+	// 아래는 데몬(G2)이 다운로드를 관제하기 위한 훅. CLI 직접 실행에선 전부 nil.
+	Counters         *Progress    // 진행 바이트/전체 크기를 외부에서 읽을 수 있게 공유
+	Limiter          Limiter      // 전역 속도 제한기
+	OnOutputResolved func(string) // 최종 저장 경로가 확정되면 호출 (재시작 복원에 필요)
+}
+
+// Progress는 외부 관찰자(데몬)가 읽는 진행 카운터.
+type Progress struct {
+	Total atomic.Int64 // -1 = 아직 모름
+	Done  atomic.Int64
+}
+
+// Limiter는 n바이트 수신 허가가 날 때까지 블록한다.
+type Limiter interface {
+	WaitN(ctx context.Context, n int) error
 }
 
 const (
@@ -63,9 +79,19 @@ func Run(ctx context.Context, opt Options) error {
 	if err != nil {
 		return err
 	}
+	if opt.OnOutputResolved != nil {
+		opt.OnOutputResolved(output)
+	}
 	if _, err := os.Stat(output); err == nil {
 		return fmt.Errorf("파일이 이미 존재합니다: %s (지우거나 -o로 다른 경로를 지정하세요)", output)
 	}
+
+	counters := opt.Counters
+	if counters == nil {
+		counters = &Progress{}
+	}
+	counters.Total.Store(info.Size)
+	counters.Done.Store(0)
 
 	d := &download{
 		opt:      opt,
@@ -73,6 +99,7 @@ func Run(ctx context.Context, opt Options) error {
 		output:   output,
 		partPath: output + ".part",
 		metaPath: store.MetaPath(output),
+		counters: counters,
 	}
 
 	if info.SupportsRange && info.Size > 0 {
@@ -87,8 +114,7 @@ type download struct {
 	output   string
 	partPath string
 	metaPath string
-
-	totalDone atomic.Int64 // 진행률 표시용 누적 바이트
+	counters *Progress // 진행률 표시·외부 관찰용 누적 카운터
 }
 
 // ---- 분할 다운로드 경로 ----
@@ -115,7 +141,7 @@ func (d *download) runSegmented(ctx context.Context) error {
 	for i := range meta.Segments {
 		already += meta.Segments[i].Done
 	}
-	d.totalDone.Store(already)
+	d.counters.Done.Store(already)
 	if resumed && d.opt.Progress != nil {
 		fmt.Fprintf(d.opt.Progress, "이어받기: %s 받은 지점부터 계속합니다 (%d개 구간)\n",
 			formatBytes(already), len(meta.Segments))
@@ -211,10 +237,35 @@ func (d *download) fetchSegment(ctx context.Context, f *os.File, seg *store.Segm
 	}
 	defer resp.Body.Close()
 
-	w := &segmentWriter{f: f, off: start, seg: seg, total: &d.totalDone}
+	w := &segmentWriter{f: f, off: start, seg: seg, total: &d.counters.Done}
 	// 서버가 요청 범위보다 많이 보내도 구간 경계를 넘겨 쓰지 않는다.
-	_, err = io.Copy(w, io.LimitReader(resp.Body, seg.End-start+1))
+	body := d.limited(ctx, resp.Body)
+	_, err = io.Copy(w, io.LimitReader(body, seg.End-start+1))
 	return err
+}
+
+// limited는 속도 제한기가 설정돼 있으면 본문 읽기를 그것으로 감싼다.
+func (d *download) limited(ctx context.Context, r io.Reader) io.Reader {
+	if d.opt.Limiter == nil {
+		return r
+	}
+	return &limitedReader{ctx: ctx, r: r, lim: d.opt.Limiter}
+}
+
+type limitedReader struct {
+	ctx context.Context
+	r   io.Reader
+	lim Limiter
+}
+
+func (b *limitedReader) Read(p []byte) (int, error) {
+	n, err := b.r.Read(p)
+	if n > 0 {
+		if werr := b.lim.WaitN(b.ctx, n); werr != nil {
+			return n, werr
+		}
+	}
+	return n, err
 }
 
 // segmentWriter는 자기 구간 오프셋에 WriteAt 하고, 쓴 만큼만 카운터를
@@ -294,7 +345,7 @@ func (d *download) startAux(ctx context.Context, meta *store.Meta) (stop func())
 		defer wg.Done()
 		saveTick := time.NewTicker(metaSaveEvery)
 		defer saveTick.Stop()
-		printer := newProgressPrinter(d.opt.Progress, d.info.Size, &d.totalDone)
+		printer := newProgressPrinter(d.opt.Progress, d.info.Size, &d.counters.Done)
 		defer printer.close()
 		for {
 			select {
@@ -327,6 +378,7 @@ func (d *download) runSingle(ctx context.Context) error {
 	defer resp.Body.Close()
 	if d.info.Size < 0 {
 		d.info.Size = resp.ContentLength // probe보다 정확할 수 있다
+		d.counters.Total.Store(d.info.Size)
 	}
 
 	// Range 없이는 중간부터 받을 방법이 없으므로 항상 처음부터.
@@ -337,7 +389,7 @@ func (d *download) runSingle(ctx context.Context) error {
 	defer f.Close()
 
 	stop := d.startSingleProgress(ctx)
-	_, err = io.Copy(io.MultiWriter(f, countWriter{&d.totalDone}), resp.Body)
+	_, err = io.Copy(io.MultiWriter(f, countWriter{&d.counters.Done}), d.limited(ctx, resp.Body))
 	stop()
 	if ctx.Err() != nil {
 		return ctx.Err()
@@ -361,7 +413,7 @@ func (d *download) startSingleProgress(ctx context.Context) (stop func()) {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		printer := newProgressPrinter(d.opt.Progress, d.info.Size, &d.totalDone)
+		printer := newProgressPrinter(d.opt.Progress, d.info.Size, &d.counters.Done)
 		defer printer.close()
 		for {
 			select {
