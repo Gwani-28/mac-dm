@@ -86,10 +86,17 @@ func Download(ctx context.Context, opt Options) (string, error) {
 		"--progress-template", "DLPROG %(progress.downloaded_bytes)s %(progress.total_bytes)s %(progress.total_bytes_estimate)s",
 		"--print", "after_move:filepath", // 병합·이동 후 최종 경로를 stdout에 한 줄
 		"--no-warnings",
+		// 유튜브가 어떤 플레이어 클라이언트엔 포맷을 안 줄 때가 있어 여러 개로 폴백.
+		// (한 클라이언트가 스토리보드만 주면 "포맷 없음" 에러가 났었다 → 다중 폴백으로 해결)
+		"--extractor-args", "youtube:player_client=default,tv,web_safari,ios",
+		"--retries", "5",
+		"--fragment-retries", "10",
 	}
-	for k, v := range opt.Headers {
-		args = append(args, "--add-header", k+":"+v)
-	}
+	// 주의: 브라우저 헤더(Cookie·User-Agent)는 yt-dlp에 넘기지 않는다.
+	// yt-dlp는 유튜브용으로 자체 클라이언트를 위장하는데, 브라우저 UA를 강제로
+	// 덮으면 유튜브가 포맷 없는 응답을 줘서 다운로드가 깨진다(실측). 로그인 영상은
+	// 추후 --cookies-from-browser로 따로 다룬다. opt.Headers는 호환 위해 유지만 한다.
+	_ = opt.Headers
 	args = append(args, opt.URL)
 
 	cmd := exec.CommandContext(ctx, yt, args...)

@@ -47,7 +47,9 @@ async function buildHeaders(url: string, referrer?: string): Promise<Record<stri
 }
 
 async function sendToDaemon(url: string, referrer?: string, kind?: string): Promise<HostResponse> {
-  const headers = await buildHeaders(url, referrer);
+  // 영상 사이트(yt-dlp 경로)는 쿠키·UA를 넘기지 않는다 — yt-dlp가 자체 클라이언트를
+  // 쓰므로 브라우저 헤더를 강제하면 오히려 다운로드가 깨진다. 일반 파일만 헤더 전달.
+  const headers = kind === "video" ? undefined : await buildHeaders(url, referrer);
   return (await chrome.runtime.sendNativeMessage(HOST, {
     type: "add",
     url,

@@ -507,6 +507,13 @@ func (d *download) finish(f *os.File) error {
 			st.Size(), d.info.Size, d.partPath)
 	}
 	if err := os.Rename(d.partPath, d.output); err != nil {
+		// 멱등성: .part가 사라졌는데 최종 파일이 이미 올바른 크기로 있으면
+		// (이전 finish가 이미 옮긴 것) 성공으로 본다. 그래야 재개·재시도 경합에서
+		// 멀쩡히 끝난 작업이 "rename: no such file"로 거짓 실패하지 않는다.
+		if dst, e := os.Stat(d.output); e == nil && (d.info.Size < 0 || dst.Size() == d.info.Size) {
+			store.Remove(d.metaPath)
+			return nil
+		}
 		return err
 	}
 	store.Remove(d.metaPath)
