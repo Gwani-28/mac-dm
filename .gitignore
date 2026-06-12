@@ -2,3 +2,9 @@
 *.part
 *.dm.json
 .DS_Store
+gui/src-tauri/target/
+gui/node_modules/
+gui/src-tauri/gen/
+extension/node_modules/
+extension/dist/
+extension/.ext-key.pem

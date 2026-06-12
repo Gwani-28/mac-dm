@@ -62,6 +62,48 @@ func (c *Client) EnsureDaemon() error {
 	return fmt.Errorf("데몬을 시작했지만 응답이 없습니다. `dm daemon status`와 ~/.mac-dm/daemon.log를 확인하세요")
 }
 
+// FindDM은 dm 바이너리를 찾는다 (GUI·네이티브 메시징 호스트가 사용).
+// 순서: DM_BIN 환경변수 → ~/.mac-dm/bin/dm → 흔한 설치 경로 → PATH.
+func FindDM() (string, error) {
+	if p := os.Getenv("DM_BIN"); p != "" {
+		if st, err := os.Stat(p); err == nil && !st.IsDir() {
+			return p, nil
+		}
+	}
+	if dir, err := daemon.Dir(); err == nil {
+		p := dir + "/bin/dm"
+		if st, err := os.Stat(p); err == nil && !st.IsDir() {
+			return p, nil
+		}
+	}
+	for _, p := range []string{"/opt/homebrew/bin/dm", "/usr/local/bin/dm"} {
+		if st, err := os.Stat(p); err == nil && !st.IsDir() {
+			return p, nil
+		}
+	}
+	if p, err := exec.LookPath("dm"); err == nil {
+		return p, nil
+	}
+	return "", fmt.Errorf("dm 바이너리를 찾을 수 없습니다 (~/.mac-dm/bin/dm 위치에 설치하세요)")
+}
+
+// EnsureDaemonVia는 EnsureDaemon과 같지만 지정한 dm 바이너리로 데몬을 띄운다.
+func (c *Client) EnsureDaemonVia(dmPath string) error {
+	if _, err := c.Status(); err == nil {
+		return nil
+	}
+	if err := StartDaemonWith(dmPath); err != nil {
+		return err
+	}
+	for range 20 {
+		time.Sleep(100 * time.Millisecond)
+		if _, err := c.Status(); err == nil {
+			return nil
+		}
+	}
+	return fmt.Errorf("데몬을 시작했지만 응답이 없습니다. ~/.mac-dm/daemon.log를 확인하세요")
+}
+
 // StartDaemon은 자기 자신을 `daemon run`으로 분리 실행한다.
 // 로그는 ~/.mac-dm/daemon.log에 쌓인다.
 func StartDaemon() error {
@@ -69,6 +111,11 @@ func StartDaemon() error {
 	if err != nil {
 		return err
 	}
+	return StartDaemonWith(self)
+}
+
+// StartDaemonWith는 지정한 dm 바이너리로 데몬을 분리 실행한다.
+func StartDaemonWith(self string) error {
 	dir, err := daemon.Dir()
 	if err != nil {
 		return err

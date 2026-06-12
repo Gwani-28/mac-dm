@@ -29,6 +29,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"mac-dm/internal/hls"
 	"mac-dm/internal/httpclient"
 	"mac-dm/internal/store"
 )
@@ -36,15 +37,19 @@ import (
 // Options는 한 번의 다운로드 실행 설정.
 type Options struct {
 	URL         string
-	Output      string    // 비우면 서버/URL에서 파일명 결정, 현재 폴더에 저장
-	Connections int       // 분할 커넥션 수 (기본 8)
-	Progress    io.Writer // 진행률 출력 대상. nil이면 출력 없음
+	Output      string            // 비우면 서버/URL에서 파일명 결정, 현재 폴더에 저장
+	Connections int               // 분할 커넥션 수 (기본 8)
+	Headers     map[string]string // 요청에 실을 추가 헤더 (쿠키·Referer 등, 크롬 연동용)
+	Progress    io.Writer         // 진행률 출력 대상. nil이면 출력 없음
 
 	// 아래는 데몬(G2)이 다운로드를 관제하기 위한 훅. CLI 직접 실행에선 전부 nil.
 	Counters         *Progress    // 진행 바이트/전체 크기를 외부에서 읽을 수 있게 공유
 	Limiter          Limiter      // 전역 속도 제한기
 	OnOutputResolved func(string) // 최종 저장 경로가 확정되면 호출 (재시작 복원에 필요)
 }
+
+// IsHLS는 URL만으로 HLS 스트림(.m3u8)인지 판단한다. 데몬·CLI가 라우팅에 쓴다.
+func IsHLS(url string) bool { return hls.IsManifestURL(url) }
 
 // Progress는 외부 관찰자(데몬)가 읽는 진행 카운터.
 type Progress struct {
@@ -70,7 +75,12 @@ func Run(ctx context.Context, opt Options) error {
 		opt.Connections = 8
 	}
 
-	info, err := httpclient.Probe(ctx, opt.URL)
+	// G5: HLS(.m3u8)는 세그먼트 스트림이라 Range 분할이 안 맞는다 → ffmpeg 경로로.
+	if IsHLS(opt.URL) {
+		return runHLS(ctx, opt)
+	}
+
+	info, err := httpclient.Probe(ctx, opt.URL, opt.Headers)
 	if err != nil {
 		return err
 	}
@@ -231,7 +241,7 @@ func (d *download) fetchSegment(ctx context.Context, f *os.File, seg *store.Segm
 	if start > seg.End {
 		return nil // 이미 다 받은 구간
 	}
-	resp, err := httpclient.RangeGet(ctx, d.opt.URL, start, seg.End)
+	resp, err := httpclient.RangeGet(ctx, d.opt.URL, start, seg.End, d.opt.Headers)
 	if err != nil {
 		return err
 	}
@@ -371,7 +381,7 @@ func (d *download) runSingle(ctx context.Context) error {
 	}
 	store.Remove(d.metaPath) // 남아있을 수 있는 옛 메타는 의미 없다
 
-	resp, err := httpclient.Get(ctx, d.opt.URL)
+	resp, err := httpclient.Get(ctx, d.opt.URL, d.opt.Headers)
 	if err != nil {
 		return err
 	}

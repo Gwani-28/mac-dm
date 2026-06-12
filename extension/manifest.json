@@ -1,0 +1,23 @@
+{
+  "manifest_version": 3,
+  "name": "Mac DM — 다운로드 가로채기",
+  "version": "0.4.0",
+  "description": "크롬 다운로드를 Mac DM 데몬으로 보내 분할 다운로드합니다.",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA0nzwHWRafuvNsMou9s7dtCNzbw78JqdWyFgS2VZp0MCBv8YPDtTIpgY8duXqh9/W6QCdWkIGyKh+Khcd0o8gSzEysUvD4InjtBNX9/xoRpnrzalJbsTVGjnyLwtdr7BToYhULxfRfHzBk5JxAs7bjkc389pejZsg91St+oclqrHG7fTGIbG8FcX7mqsurLbJghLttkhPykTCSXLq9Vm5+h/q8Ryhu9uWB41AaMkpF2KxhW6pInPQ1vSx2x6n6FrqglaPGCeGnH0a3iw5nwYIPoY9G11pETvYTJlgJeg7rrvoJLwTqiwehxCdfcEJLvPF2jIScj4nzDrhrSodoSCeGQIDAQAB",
+  "icons": { "32": "icons/icon32.png", "128": "icons/icon128.png" },
+  "background": { "service_worker": "dist/background.js", "type": "module" },
+  "action": {
+    "default_popup": "popup.html",
+    "default_icon": { "32": "icons/icon32.png" }
+  },
+  "permissions": [
+    "downloads",
+    "webRequest",
+    "cookies",
+    "nativeMessaging",
+    "storage",
+    "contextMenus",
+    "notifications"
+  ],
+  "host_permissions": ["<all_urls>"]
+}

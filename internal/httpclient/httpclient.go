@@ -42,16 +42,24 @@ type Info struct {
 	LastModified  string
 }
 
+// applyHeaders: 기본 UA를 깔고, 호출자가 준 헤더(쿠키·Referer·브라우저 UA 등)로 덮는다.
+func applyHeaders(req *http.Request, extra map[string]string) {
+	req.Header.Set("User-Agent", userAgent)
+	for k, v := range extra {
+		req.Header.Set(k, v)
+	}
+}
+
 // Probe는 `Range: bytes=0-0` GET 한 번으로 Range 지원 여부와 전체 크기를 알아낸다.
 // HEAD 대신 GET을 쓰는 이유: HEAD를 막아둔 서버가 많고, 206 응답의
 // Content-Range가 전체 크기까지 알려주기 때문.
-func Probe(ctx context.Context, rawURL string) (*Info, error) {
+func Probe(ctx context.Context, rawURL string, headers map[string]string) (*Info, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
 	if err != nil {
 		return nil, err
 	}
+	applyHeaders(req, headers)
 	req.Header.Set("Range", "bytes=0-0")
-	req.Header.Set("User-Agent", userAgent)
 
 	resp, err := Client.Do(req)
 	if err != nil {
@@ -83,13 +91,13 @@ func Probe(ctx context.Context, rawURL string) (*Info, error) {
 }
 
 // RangeGet은 [start, end] (양 끝 포함) 구간을 요청하고 206 응답을 검증한다.
-func RangeGet(ctx context.Context, rawURL string, start, end int64) (*http.Response, error) {
+func RangeGet(ctx context.Context, rawURL string, start, end int64, headers map[string]string) (*http.Response, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
 	if err != nil {
 		return nil, err
 	}
+	applyHeaders(req, headers)
 	req.Header.Set("Range", fmt.Sprintf("bytes=%d-%d", start, end))
-	req.Header.Set("User-Agent", userAgent)
 
 	resp, err := Client.Do(req)
 	if err != nil {
@@ -103,12 +111,12 @@ func RangeGet(ctx context.Context, rawURL string, start, end int64) (*http.Respo
 }
 
 // Get은 처음부터 전체를 요청한다 (Range 미지원 폴백용).
-func Get(ctx context.Context, rawURL string) (*http.Response, error) {
+func Get(ctx context.Context, rawURL string, headers map[string]string) (*http.Response, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set("User-Agent", userAgent)
+	applyHeaders(req, headers)
 
 	resp, err := Client.Do(req)
 	if err != nil {

@@ -119,9 +119,11 @@ func (m *Manager) Add(req api.AddJobRequest) (api.Job, error) {
 		URL:         req.URL,
 		Output:      out,
 		Connections: req.Connections,
+		Category:    api.Categorize(req.URL),
 		Status:      api.StatusQueued,
 		TotalBytes:  -1,
 		AddedAt:     time.Now(),
+		Headers:     req.Headers,
 	}}
 	m.jobs[j.ID] = j
 	m.order = append(m.order, j.ID)
@@ -317,11 +319,13 @@ func (m *Manager) runJob(ctx context.Context, j *job) {
 		URL:         j.URL,
 		Output:      j.Output,
 		Connections: j.Connections,
+		Headers:     j.Headers,
 		Counters:    j.counters,
 		Limiter:     m.limiter,
 		OnOutputResolved: func(p string) {
 			m.mu.Lock()
 			j.Output = p // 확정 경로 저장 → 재시작해도 같은 .part를 이어받는다
+			j.Category = api.Categorize(p)
 			m.mu.Unlock()
 		},
 	})

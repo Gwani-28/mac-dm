@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Mac DM</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div id="banner" class="banner hidden"></div>
+
+  <header class="topbar">
+    <form id="add-form" autocomplete="off">
+      <input id="url-input" type="text" placeholder="다운로드 URL을 붙여넣으세요 (http://, https://)" spellcheck="false" />
+      <button type="submit" class="primary">＋ 추가</button>
+    </form>
+  </header>
+
+  <div class="layout">
+    <aside class="sidebar">
+      <div class="side-title">카테고리</div>
+      <nav id="cat-nav">
+        <button data-cat="" class="cat active"><span>📥</span>전체 <em id="cnt-all"></em></button>
+        <button data-cat="video" class="cat"><span>🎬</span>영상 <em id="cnt-video"></em></button>
+        <button data-cat="audio" class="cat"><span>🎵</span>음악 <em id="cnt-audio"></em></button>
+        <button data-cat="image" class="cat"><span>🖼️</span>이미지 <em id="cnt-image"></em></button>
+        <button data-cat="doc" class="cat"><span>📄</span>문서 <em id="cnt-doc"></em></button>
+        <button data-cat="archive" class="cat"><span>🗜️</span>압축 <em id="cnt-archive"></em></button>
+        <button data-cat="app" class="cat"><span>📦</span>프로그램 <em id="cnt-app"></em></button>
+        <button data-cat="etc" class="cat"><span>📁</span>기타 <em id="cnt-etc"></em></button>
+      </nav>
+
+      <div class="side-title">상태</div>
+      <nav id="status-nav">
+        <button data-st="" class="st active">전체</button>
+        <button data-st="active" class="st">진행중</button>
+        <button data-st="queued" class="st">대기</button>
+        <button data-st="paused" class="st">일시정지</button>
+        <button data-st="done" class="st">완료</button>
+        <button data-st="failed" class="st">실패</button>
+      </nav>
+
+      <div class="side-bottom">
+        <div class="side-title">설정</div>
+        <label class="setting">
+          속도 제한
+          <span class="setting-row">
+            <input id="limit-input" type="text" placeholder="예: 2M" size="5" />
+            <button id="limit-apply" type="button">적용</button>
+            <button id="limit-off" type="button">해제</button>
+          </span>
+        </label>
+        <label class="setting">
+          동시 다운로드
+          <span class="setting-row">
+            <select id="concurrent-select">
+              <option>1</option><option>2</option><option selected>3</option>
+              <option>4</option><option>5</option><option>6</option><option>8</option>
+            </select>
+          </span>
+        </label>
+        <div id="daemon-info" class="daemon-info">데몬 연결 중…</div>
+      </div>
+    </aside>
+
+    <main id="job-list" class="jobs"></main>
+  </div>
+
+  <script src="main.js"></script>
+</body>
+</html>

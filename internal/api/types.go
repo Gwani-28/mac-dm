@@ -20,6 +20,7 @@ type Job struct {
 	URL         string     `json:"url"`
 	Output      string     `json:"output"` // 최종 저장 경로 (확정 전이면 폴더)
 	Connections int        `json:"connections"`
+	Category    string     `json:"category"`
 	Status      JobStatus  `json:"status"`
 	Error       string     `json:"error,omitempty"`
 	TotalBytes  int64      `json:"total_bytes"` // -1 = 아직 모름
@@ -27,12 +28,15 @@ type Job struct {
 	Speed       int64      `json:"speed"` // bytes/sec (active일 때만 의미)
 	AddedAt     time.Time  `json:"added_at"`
 	FinishedAt  *time.Time `json:"finished_at,omitempty"`
+	// 요청 헤더 (쿠키 포함 가능 — jobs.json은 0600 권한). 이어받기에 필요해서 저장한다.
+	Headers map[string]string `json:"headers,omitempty"`
 }
 
 type AddJobRequest struct {
-	URL         string `json:"url"`
-	Output      string `json:"output,omitempty"`
-	Connections int    `json:"connections,omitempty"`
+	URL         string            `json:"url"`
+	Output      string            `json:"output,omitempty"`
+	Connections int               `json:"connections,omitempty"`
+	Headers     map[string]string `json:"headers,omitempty"` // 쿠키·Referer 등 (크롬 연동)
 }
 
 // ConfigRequest의 nil 필드는 "변경 없음".

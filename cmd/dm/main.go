@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"syscall"
@@ -68,6 +69,8 @@ func main() {
 		runConcurrent(os.Args[2:])
 	case "daemon":
 		runDaemonCmd(os.Args[2:])
+	case "host":
+		runHostCmd(os.Args[2:])
 	default:
 		fmt.Fprintf(os.Stderr, "알 수 없는 명령: %s\n\n%s", os.Args[1], usage)
 		os.Exit(2)
@@ -381,6 +384,61 @@ func runDaemonCmd(args []string) {
 		fmt.Fprintln(os.Stderr, "사용법: dm daemon start|stop|status|run")
 		os.Exit(2)
 	}
+}
+
+// ---- 크롬 네이티브 메시징 호스트 설치 (G4) ----
+
+// 크롬 확장의 고정 ID (extension/manifest.json의 key에서 파생됨)
+const chromeExtensionID = "dcebalaoiglcnnnodkclemmjebmmgopi"
+
+func runHostCmd(args []string) {
+	if len(args) != 1 || (args[0] != "install" && args[0] != "uninstall") {
+		fmt.Fprintln(os.Stderr, "사용법: dm host install|uninstall")
+		os.Exit(2)
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		fatal(err)
+	}
+	manifestDir := home + "/Library/Application Support/Google/Chrome/NativeMessagingHosts"
+	manifestPath := manifestDir + "/com.macdm.host.json"
+
+	if args[0] == "uninstall" {
+		if err := os.Remove(manifestPath); err != nil && !os.IsNotExist(err) {
+			fatal(err)
+		}
+		fmt.Println("네이티브 메시징 호스트 등록 해제됨.")
+		return
+	}
+
+	// dm-host는 dm과 같은 폴더에 있어야 한다.
+	self, err := os.Executable()
+	if err != nil {
+		fatal(err)
+	}
+	hostBin := filepath.Dir(self) + "/dm-host"
+	if _, err := os.Stat(hostBin); err != nil {
+		fatal(fmt.Errorf("dm-host 바이너리가 없습니다: %s (dm과 같은 폴더에 두세요)", hostBin))
+	}
+
+	if err := os.MkdirAll(manifestDir, 0o755); err != nil {
+		fatal(err)
+	}
+	manifest := fmt.Sprintf(`{
+  "name": "com.macdm.host",
+  "description": "Mac DM 다운로드 매니저 네이티브 메시징 호스트",
+  "path": %q,
+  "type": "stdio",
+  "allowed_origins": ["chrome-extension://%s/"]
+}
+`, hostBin, chromeExtensionID)
+	if err := os.WriteFile(manifestPath, []byte(manifest), 0o644); err != nil {
+		fatal(err)
+	}
+	fmt.Println("크롬 네이티브 메시징 호스트 등록 완료:")
+	fmt.Println("  " + manifestPath)
+	fmt.Println("  → " + hostBin)
+	fmt.Println("크롬을 완전히 종료했다가 다시 열면 적용됩니다.")
 }
 
 func formatBytes(n int64) string {
