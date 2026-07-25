@@ -4,6 +4,7 @@
 확장, HLS/스트림 저장, 그리고 `yt-dlp`를 통한 유튜브 지원. CLI·GUI·브라우저가 모두
 **하나의 공유 엔진**을 굴립니다.
 
+[![CI](https://github.com/Gwani-28/mac-dm/actions/workflows/ci.yml/badge.svg)](https://github.com/Gwani-28/mac-dm/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 ![Platform: macOS](https://img.shields.io/badge/platform-macOS-lightgrey.svg)
 ![Go](https://img.shields.io/badge/engine-Go-00ADD8.svg)
@@ -152,6 +153,20 @@ Go 쪽은 **서드파티 모듈 의존성이 0** — 표준 라이브러리만 �
 이용약관과 저작권법을 지킬 **책임이 사용자에게** 있습니다. 받을 권리가 있는 콘텐츠에만
 사용하세요(예: 본인이 올린 영상, 다운로드가 허용된 자료). DRM 우회나 보호 콘텐츠 접근은
 **하지 않습니다**.
+
+## 프로젝트 상태 & 로드맵
+
+활발히 개발 중입니다. 모든 푸시마다 [CI](https://github.com/Gwani-28/mac-dm/actions)에서
+`go build`·`go vet`·`go test`와 확장 타입체크가 돌아갑니다. 다음 계획(코드 서명, 사전
+빌드 릴리스 바이너리, Homebrew tap, 체크섬 검증, GUI 다국어화)은 [**로드맵**](ROADMAP.md),
+릴리스 이력은 [**변경이력**](CHANGELOG.md)을 보세요.
+
+## 커뮤니티
+
+- [기여 가이드](CONTRIBUTING.md)
+- [행동 강령](CODE_OF_CONDUCT.md)
+- [보안 정책](SECURITY.md)
+- 아이디어·버그 → [이슈 열기](https://github.com/Gwani-28/mac-dm/issues/new/choose)
 
 ## 라이선스
 

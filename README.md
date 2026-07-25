@@ -4,6 +4,7 @@ A fast, IDM-style download manager for macOS — multi-connection segmented
 downloads, resume, a Chrome capture extension, HLS/stream saving, and YouTube
 support via `yt-dlp`. CLI, GUI, and browser all drive **one shared engine**.
 
+[![CI](https://github.com/Gwani-28/mac-dm/actions/workflows/ci.yml/badge.svg)](https://github.com/Gwani-28/mac-dm/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 ![Platform: macOS](https://img.shields.io/badge/platform-macOS-lightgrey.svg)
 ![Go](https://img.shields.io/badge/engine-Go-00ADD8.svg)
@@ -162,6 +163,21 @@ sites via `yt-dlp`, **you are responsible** for respecting each site's terms of
 service and applicable copyright law — use it only for content you have the
 right to download (e.g. your own uploads, or material licensed for download).
 It does **not** circumvent DRM or access protected content.
+
+## Project status & roadmap
+
+Actively developed. Every push runs `go build` / `go vet` / `go test` and an
+extension type-check in [CI](https://github.com/Gwani-28/mac-dm/actions).
+See the [**roadmap**](ROADMAP.md) for what's next (code signing, prebuilt
+release binaries, a Homebrew tap, checksum verification, GUI localization) and
+the [**changelog**](CHANGELOG.md) for release history.
+
+## Community
+
+- [Contributing guide](CONTRIBUTING.md)
+- [Code of Conduct](CODE_OF_CONDUCT.md)
+- [Security policy](SECURITY.md)
+- Ideas & bugs → [open an issue](https://github.com/Gwani-28/mac-dm/issues/new/choose)
 
 ## License
 

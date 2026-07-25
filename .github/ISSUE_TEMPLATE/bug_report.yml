@@ -1,0 +1,53 @@
+name: Bug report
+description: Report a problem with Mac DM
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to file a bug! Please fill in as much as you can.
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: What did you do, what did you expect, and what happened instead?
+      placeholder: |
+        1. Ran `dm add ...`
+        2. Expected ...
+        3. Instead ...
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: Output of `dm daemon status` (shows the daemon version), or the release/commit.
+      placeholder: "0.6-ytdl-qt"
+    validations:
+      required: false
+  - type: input
+    id: macos
+    attributes:
+      label: macOS version
+      placeholder: "e.g. macOS 15.5"
+    validations:
+      required: true
+  - type: dropdown
+    id: surface
+    attributes:
+      label: Where did it happen?
+      options:
+        - CLI (dm)
+        - GUI (MacDM.app)
+        - Chrome extension
+        - Daemon
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant log lines
+      description: Any relevant lines from `~/.mac-dm/daemon.log` (redact anything private).
+      render: shell
+    validations:
+      required: false

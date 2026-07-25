@@ -8,3 +8,6 @@ gui/src-tauri/gen/
 extension/node_modules/
 extension/dist/
 extension/.ext-key.pem
+
+# 내부 AI 작업 지침(공개 불필요)
+CLAUDE.md
