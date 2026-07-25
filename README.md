@@ -11,6 +11,8 @@ support via `yt-dlp`. CLI, GUI, and browser all drive **one shared engine**.
 
 **English** | [한국어](README.ko.md)
 
+![Mac DM GUI — per-connection progress](docs/screenshot.png)
+
 > Built for personal use. You are responsible for complying with the terms of
 > service and copyright of any site you download from. See
 > [Responsible use](#responsible-use).
