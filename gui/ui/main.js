@@ -44,11 +44,36 @@ function fileName(job) {
 }
 
 function eta(job) {
-  if (job.status !== "active" || !job.speed || job.total_bytes <= 0) return "";
-  const remain = (job.total_bytes - job.done_bytes) / job.speed;
+  if (job.status !== "active" || !job.speed) return "";
+  let total = job.total_bytes;
+  if ((!total || total <= 0) && job.percent > 0 && job.done_bytes > 0) {
+    total = job.done_bytes * 100 / job.percent;
+  }
+  if (!total || total <= 0) return "";
+  const remain = (total - job.done_bytes) / job.speed;
   if (remain < 0 || !isFinite(remain)) return "";
   const m = Math.floor(remain / 60), s = Math.round(remain % 60);
   return m > 0 ? `남은 시간 ${m}분 ${s}초` : `남은 시간 ${s}초`;
+}
+
+function jobPercent(job) {
+  if (job.percent > 0) return Math.min(100, job.percent);
+  if (job.total_bytes > 0) return Math.min(100, (job.done_bytes / job.total_bytes) * 100);
+  return job.status === "done" ? 100 : 0;
+}
+
+function qualityLabel(q) {
+  const labels = {
+    auto: "자동 MP4",
+    best: "최고화질",
+    "2160p": "2160p",
+    "1440p": "1440p",
+    "1080p": "1080p",
+    "720p": "720p",
+    "480p": "480p",
+    "360p": "360p",
+  };
+  return labels[q] || q || "";
 }
 
 // IDM식 분할 커넥션별 진행 막대. active이고 구간이 2개 이상일 때만.
@@ -85,13 +110,13 @@ function render() {
 
   list.innerHTML = "";
   for (const j of shown) {
-    const pct = j.total_bytes > 0 ? Math.min(100, (j.done_bytes / j.total_bytes) * 100) : (j.status === "done" ? 100 : 0);
+    const pct = jobPercent(j);
     const el = document.createElement("div");
     el.className = "job " + j.status;
 
     const sizeText = j.total_bytes > 0
       ? `${fmtBytes(j.done_bytes)} / ${fmtBytes(j.total_bytes)} (${pct.toFixed(1)}%)`
-      : (j.done_bytes > 0 ? fmtBytes(j.done_bytes) : "");
+      : (pct > 0 ? `${pct.toFixed(1)}%${j.done_bytes > 0 ? ` (${fmtBytes(j.done_bytes)})` : ""}` : (j.done_bytes > 0 ? fmtBytes(j.done_bytes) : ""));
     const speedText = j.status === "active" && j.speed > 0 ? fmtBytes(j.speed) + "/s" : "";
 
     el.innerHTML = `
@@ -105,6 +130,7 @@ function render() {
         <span class="size"></span>
         <span class="speed"></span>
         <span class="eta"></span>
+        <span class="quality"></span>
         <span class="grow"></span>
         <span class="conns"></span>
         <span class="job-actions"></span>
@@ -117,9 +143,10 @@ function render() {
     el.querySelector(".size").textContent = sizeText;
     el.querySelector(".speed").textContent = speedText;
     el.querySelector(".eta").textContent = eta(j);
+    el.querySelector(".quality").textContent = j.video_quality ? `화질 ${qualityLabel(j.video_quality)}` : "";
     const connsEl = el.querySelector(".conns");
     if (connsEl && j.segments && j.segments.length > 1) {
-      connsEl.textContent = `커넥션 ${j.segments.length}개`;
+      connsEl.textContent = j.kind === "video" ? `조각 슬롯 ${j.segments.length}개` : `커넥션 ${j.segments.length}개`;
     }
     if (j.error) el.querySelector(".job-err").textContent = "⚠ " + j.error;
 
@@ -166,8 +193,9 @@ async function refresh() {
   try {
     jobs = (await invoke("api_get", { path: "/jobs" })) || [];
     const st = await invoke("api_get", { path: "/status" });
+    const daemonVersion = st.version ? ` · v${st.version}` : "";
     $("#daemon-info").textContent =
-      `데몬 연결됨 (pid ${st.pid})\n진행 ${st.active} · 대기 ${st.queued} · 전체 ${st.jobs}` +
+      `데몬 연결됨 (pid ${st.pid}${daemonVersion})\n진행 ${st.active} · 대기 ${st.queued} · 전체 ${st.jobs}` +
       (st.speed_limit > 0 ? `\n속도 제한 ${fmtBytes(st.speed_limit)}/s` : "");
     if ($("#concurrent-select").value !== String(st.max_active)) {
       $("#concurrent-select").value = String(st.max_active);
@@ -204,7 +232,7 @@ function wire() {
     }
     try {
       await invoke("ensure_daemon");
-      await invoke("api_post", { path: "/jobs", body: { url } });
+      await invoke("api_post", { path: "/jobs", body: { url, video_quality: $("#quality-select").value } });
       $("#url-input").value = "";
       hideBanner();
       await refresh();

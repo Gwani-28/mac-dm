@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -32,8 +33,8 @@ type throttledWriter struct {
 	throttle time.Duration
 }
 
-func (t *throttledWriter) Header() http.Header        { return t.w.Header() }
-func (t *throttledWriter) WriteHeader(code int)       { t.w.WriteHeader(code) }
+func (t *throttledWriter) Header() http.Header  { return t.w.Header() }
+func (t *throttledWriter) WriteHeader(code int) { t.w.WriteHeader(code) }
 func (t *throttledWriter) Write(p []byte) (int, error) {
 	const chunk = 64 << 10
 	written := 0
@@ -89,6 +90,42 @@ func countByStatus(m *Manager, s api.JobStatus) int {
 		}
 	}
 	return n
+}
+
+func TestNormalizePersistedJobClearsOverbroadNaverVideo(t *testing.T) {
+	j := api.Job{
+		URL:          "https://bigfile.mail.naver.com/download?fid=abc",
+		Category:     api.CategoryVideo,
+		Kind:         "video",
+		VideoQuality: "auto",
+		Status:       api.StatusFailed,
+		Error:        "yt-dlp 실패: requested format is not available",
+	}
+	var m Manager
+	m.normalizePersistedJob(&j)
+	if j.Kind != "" {
+		t.Fatalf("kind = %q, want empty", j.Kind)
+	}
+	if j.VideoQuality != "" {
+		t.Fatalf("video quality = %q, want empty", j.VideoQuality)
+	}
+	if j.Category != api.CategoryEtc {
+		t.Fatalf("category = %q, want %q", j.Category, api.CategoryEtc)
+	}
+	if !strings.Contains(j.Error, "재개하면 일반 다운로드") {
+		t.Fatalf("error was not rewritten: %q", j.Error)
+	}
+
+	j = api.Job{
+		URL:      "https://bigfile.mail.naver.com/download?fid=abc",
+		Category: api.CategoryEtc,
+		Status:   api.StatusFailed,
+		Error:    "yt-dlp 실패: stale error after previous normalization",
+	}
+	m.normalizePersistedJob(&j)
+	if !strings.Contains(j.Error, "재개하면 일반 다운로드") {
+		t.Fatalf("stale error was not rewritten: %q", j.Error)
+	}
 }
 
 // 동시 실행 제한: maxActive=1이면 한 번에 하나만 받고 나머지는 대기.

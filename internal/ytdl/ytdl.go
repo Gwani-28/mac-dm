@@ -4,13 +4,15 @@
 // 다운로드 주소가 플레이어 JS로 암호화된다(n 파라미터). 이걸 풀려면 JS 실행이
 // 필요해 Range 분할 엔진으로도 ffmpeg로도 안 된다. yt-dlp가 그 일을 한다.
 // (CLAUDE.md 4번: ffmpeg는 G5에서 exec 허용. yt-dlp도 같은 성격의 외부 도구로
-//  운영자 승인하에 추가됨 — 2026-06-13.)
+//
+//	운영자 승인하에 추가됨 — 2026-06-13.)
 package ytdl
 
 import (
 	"bufio"
 	"context"
 	"fmt"
+	"net/url"
 	"os"
 	"os/exec"
 	"strconv"
@@ -64,16 +66,21 @@ var videoHosts = []string{
 	"vimeo.com", "dailymotion.com", "twitch.tv",
 	"tiktok.com", "instagram.com", "facebook.com", "fb.watch",
 	"twitter.com", "x.com", "soundcloud.com", "bilibili.com",
-	"naver.com", "tv.naver.com", "chzzk.naver.com", "kakao.com",
+	"tv.naver.com", "chzzk.naver.com", "tv.kakao.com",
 }
 
 // IsVideoSite는 URL이 알려진 스트리밍 사이트인지 본다 (자동 라우팅용).
 func IsVideoSite(rawURL string) bool {
-	u := strings.ToLower(rawURL)
-	// 호스트 부분만 대충 뽑아 부분 일치 (정확한 파싱 불필요 — 보수적으로만)
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return false
+	}
+	host := strings.ToLower(u.Hostname())
+	if host == "" {
+		return false
+	}
 	for _, h := range videoHosts {
-		if strings.Contains(u, "://"+h) || strings.Contains(u, "://www."+h) ||
-			strings.Contains(u, "."+h+"/") || strings.Contains(u, "//"+h+"/") {
+		if host == h || strings.HasSuffix(host, "."+h) {
 			return true
 		}
 	}
@@ -87,12 +94,83 @@ func Available() bool { return Path() != "" }
 type Options struct {
 	URL        string
 	Dir        string            // 저장 폴더
+	Quality    string            // auto/best/2160p/1440p/1080p/720p/480p/360p
+	Fragments  int               // yt-dlp 병렬 조각 다운로드 수
 	Headers    map[string]string // 쿠키 등 (로그인 영상용)
-	OnProgress func(done, total int64)
+	OnProgress func(ProgressEvent)
 	OnFile     func(path string) // 최종 파일 경로가 확정되면 호출
 }
 
-// Download는 yt-dlp로 최고화질 영상+음성을 받아 mp4로 병합한다.
+// ProgressEvent는 yt-dlp 진행 출력 한 줄을 구조화한 값이다.
+type ProgressEvent struct {
+	Done          int64
+	Total         int64
+	Percent       float64
+	FragmentIndex int
+	FragmentCount int
+}
+
+const quickTimeFormat = "bv*[ext=mp4][vcodec^=avc1]+ba[ext=m4a][acodec^=mp4a]/b[ext=mp4][vcodec^=avc1][acodec^=mp4a]/b[ext=mp4]/best[ext=mp4]"
+const bestFormat = "bv*+ba/b"
+
+var heightQualities = map[string]int{
+	"2160p": 2160,
+	"1440p": 1440,
+	"1080p": 1080,
+	"720p":  720,
+	"480p":  480,
+	"360p":  360,
+}
+
+// NormalizeQuality는 사용자가 입력한 품질 이름을 내부 표준값으로 바꾼다.
+func NormalizeQuality(q string) (string, error) {
+	q = strings.ToLower(strings.TrimSpace(q))
+	switch q {
+	case "", "auto", "quicktime", "mp4":
+		return "auto", nil
+	case "best", "highest", "max":
+		return "best", nil
+	case "4k", "uhd", "2160":
+		return "2160p", nil
+	case "2k", "qhd", "1440":
+		return "1440p", nil
+	case "fhd", "fullhd", "1080":
+		return "1080p", nil
+	case "hd", "720":
+		return "720p", nil
+	case "480":
+		return "480p", nil
+	case "360":
+		return "360p", nil
+	}
+	if _, ok := heightQualities[q]; ok {
+		return q, nil
+	}
+	return "", fmt.Errorf("지원하지 않는 영상 화질입니다: %q (auto, best, 2160p, 1440p, 1080p, 720p, 480p, 360p 중 하나)", q)
+}
+
+func formatForQuality(q string) (string, error) {
+	q, err := NormalizeQuality(q)
+	if err != nil {
+		return "", err
+	}
+	switch q {
+	case "auto":
+		return quickTimeFormat, nil
+	case "best":
+		return bestFormat, nil
+	}
+	h, ok := heightQualities[q]
+	if !ok {
+		return "", fmt.Errorf("지원하지 않는 영상 화질입니다: %q", q)
+	}
+	limit := strconv.Itoa(h)
+	return "bv*[height<=" + limit + "][ext=mp4][vcodec^=avc1]+ba[ext=m4a][acodec^=mp4a]/" +
+		"b[height<=" + limit + "][ext=mp4][vcodec^=avc1][acodec^=mp4a]/" +
+		"bv*[height<=" + limit + "]+ba/b[height<=" + limit + "]/best[height<=" + limit + "]", nil
+}
+
+// Download는 yt-dlp로 QuickTime 호환성이 높은 H.264 영상+AAC 음성을 받아 mp4로 병합한다.
 // 최종 파일 경로를 돌려준다.
 func Download(ctx context.Context, opt Options) (string, error) {
 	yt := Path()
@@ -103,15 +181,21 @@ func Download(ctx context.Context, opt Options) (string, error) {
 	if dir == "" {
 		dir = "."
 	}
+	format, err := formatForQuality(opt.Quality)
+	if err != nil {
+		return "", err
+	}
 
 	args := []string{
 		"--no-playlist",
-		"--no-part",
-		"-f", "bv*+ba/b", // 최고화질 영상+음성, 안 되면 통합본
+		// QuickTime은 mp4 컨테이너라도 VP9/AV1·Opus 조합을 못 여는 경우가 많다.
+		// 그래서 유튜브에서 널리 제공되는 H.264(avc1)+AAC(mp4a/m4a)를 우선 선택한다.
+		"-f", format,
+		"-N", strconv.Itoa(normalizeFragments(opt.Fragments)),
 		"--merge-output-format", "mp4",
 		"-o", dir + "/%(title)s.%(ext)s",
 		"--newline",
-		"--progress-template", "DLPROG %(progress.downloaded_bytes)s %(progress.total_bytes)s %(progress.total_bytes_estimate)s",
+		"--progress-template", "DLPROG %(progress.downloaded_bytes)s %(progress.total_bytes)s %(progress.total_bytes_estimate)s %(progress._percent_str)s %(progress.fragment_index)s %(progress.fragment_count)s",
 		"--print", "after_move:filepath", // 병합·이동 후 최종 경로를 stdout에 한 줄
 		"--no-warnings",
 		// 유튜브가 어떤 플레이어 클라이언트엔 포맷을 안 줄 때가 있어 여러 개로 폴백.
@@ -169,7 +253,104 @@ func Download(ctx context.Context, opt Options) (string, error) {
 		}
 		return "", fmt.Errorf("다운로드는 됐지만 최종 파일을 못 만들었습니다%s", hint)
 	}
+	if err := ensureQuickTimeCompatible(ctx, finalPath, opt.Quality); err != nil {
+		return "", err
+	}
 	return finalPath, nil
+}
+
+func normalizeFragments(n int) int {
+	if n < 1 {
+		return 8
+	}
+	if n > 16 {
+		return 16
+	}
+	return n
+}
+
+func ensureQuickTimeCompatible(ctx context.Context, path, quality string) error {
+	q, err := NormalizeQuality(quality)
+	if err != nil {
+		return err
+	}
+	if q == "best" {
+		return nil
+	}
+	ok, err := isQuickTimeCompatible(ctx, path)
+	if err != nil {
+		return err
+	}
+	if ok {
+		return nil
+	}
+	fdir := ffmpegDir()
+	if fdir == "" {
+		return fmt.Errorf("QuickTime 호환 MP4로 변환해야 하지만 ffmpeg를 찾을 수 없습니다 — `brew install ffmpeg`")
+	}
+	tmp := path + ".qt.mp4"
+	os.Remove(tmp)
+	args := []string{
+		"-y", "-hide_banner", "-loglevel", "error",
+		"-i", path,
+		"-map", "0:v:0", "-map", "0:a?",
+		"-c:v", "libx264", "-preset", "veryfast", "-crf", "20", "-pix_fmt", "yuv420p",
+		"-c:a", "aac", "-b:a", "160k",
+		"-movflags", "+faststart",
+		tmp,
+	}
+	cmd := exec.CommandContext(ctx, fdir+"/ffmpeg", args...)
+	var stderr strings.Builder
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		os.Remove(tmp)
+		msg := strings.TrimSpace(stderr.String())
+		if msg == "" {
+			msg = err.Error()
+		}
+		return fmt.Errorf("QuickTime 호환 MP4 변환 실패: %s", msg)
+	}
+	if err := os.Rename(tmp, path); err != nil {
+		return err
+	}
+	return nil
+}
+
+func isQuickTimeCompatible(ctx context.Context, path string) (bool, error) {
+	fdir := ffmpegDir()
+	if fdir == "" {
+		return false, nil
+	}
+	ffprobe := fdir + "/ffprobe"
+	vcodec, err := probeStreamValue(ctx, ffprobe, path, "v:0", "codec_name")
+	if err != nil {
+		return false, err
+	}
+	pixFmt, err := probeStreamValue(ctx, ffprobe, path, "v:0", "pix_fmt")
+	if err != nil {
+		return false, err
+	}
+	acodec, err := probeStreamValue(ctx, ffprobe, path, "a:0", "codec_name")
+	if err != nil {
+		acodec = "" // 무음 영상은 허용
+	}
+	videoOK := vcodec == "h264" && (pixFmt == "yuv420p" || pixFmt == "yuvj420p")
+	audioOK := acodec == "" || acodec == "aac"
+	return videoOK && audioOK, nil
+}
+
+func probeStreamValue(ctx context.Context, ffprobe, path, stream, entry string) (string, error) {
+	out, err := exec.CommandContext(ctx, ffprobe,
+		"-v", "error",
+		"-select_streams", stream,
+		"-show_entries", "stream="+entry,
+		"-of", "default=noprint_wrappers=1:nokey=1",
+		path,
+	).Output()
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(string(out)), nil
 }
 
 func fileExists(p string) bool {
@@ -187,12 +368,20 @@ func parseOutput(r interface{ Read([]byte) (int, error) }, dir string, opt Optio
 		if strings.HasPrefix(line, "DLPROG ") {
 			f := strings.Fields(line)
 			if len(f) >= 4 && opt.OnProgress != nil {
-				done := atoiSafe(f[1])
-				total := atoiSafe(f[2])
-				if total <= 0 {
-					total = atoiSafe(f[3]) // total_bytes가 NA면 estimate
+				ev := ProgressEvent{}
+				ev.Done = atoiSafe(f[1])
+				ev.Total = atoiSafe(f[2])
+				if ev.Total <= 0 {
+					ev.Total = atoiSafe(f[3]) // total_bytes가 NA면 estimate
 				}
-				opt.OnProgress(done, total)
+				if len(f) >= 5 {
+					ev.Percent = percentSafe(f[4])
+				}
+				if len(f) >= 7 {
+					ev.FragmentIndex = int(atoiSafe(f[5]))
+					ev.FragmentCount = int(atoiSafe(f[6]))
+				}
+				opt.OnProgress(ev)
 			}
 			continue
 		}
@@ -205,6 +394,24 @@ func parseOutput(r interface{ Read([]byte) (int, error) }, dir string, opt Optio
 		}
 	}
 	return final
+}
+
+func percentSafe(s string) float64 {
+	s = strings.TrimSpace(strings.TrimSuffix(s, "%"))
+	if s == "" || s == "NA" {
+		return 0
+	}
+	v, err := strconv.ParseFloat(s, 64)
+	if err != nil {
+		return 0
+	}
+	if v < 0 {
+		return 0
+	}
+	if v > 100 {
+		return 100
+	}
+	return v
 }
 
 func atoiSafe(s string) int64 {

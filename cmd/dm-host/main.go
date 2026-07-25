@@ -5,6 +5,7 @@
 // 엔진은 데몬 하나뿐이고 이것은 얇은 어댑터다.
 //
 // 메시지:
+//
 //	{"type":"ping"}                          → {"type":"pong","daemon":bool}
 //	{"type":"add","url":"...","headers":{}}  → {"type":"added","id":"...","output":"..."}
 //	                                         → {"type":"error","message":"..."}
@@ -24,11 +25,12 @@ import (
 )
 
 type inMsg struct {
-	Type    string            `json:"type"`
-	URL     string            `json:"url,omitempty"`
-	Output  string            `json:"output,omitempty"`
-	Headers map[string]string `json:"headers,omitempty"`
-	Kind    string            `json:"kind,omitempty"`
+	Type         string            `json:"type"`
+	URL          string            `json:"url,omitempty"`
+	Output       string            `json:"output,omitempty"`
+	Headers      map[string]string `json:"headers,omitempty"`
+	Kind         string            `json:"kind,omitempty"`
+	VideoQuality string            `json:"video_quality,omitempty"`
 }
 
 type outMsg struct {
@@ -84,7 +86,7 @@ func handle(msg inMsg) outMsg {
 		if err := c.EnsureDaemonVia(dm); err != nil {
 			return outMsg{Type: "error", Message: err.Error()}
 		}
-		j, err := c.Add(api.AddJobRequest{URL: msg.URL, Output: msg.Output, Headers: msg.Headers, Kind: msg.Kind})
+		j, err := c.Add(api.AddJobRequest{URL: msg.URL, Output: msg.Output, Headers: msg.Headers, Kind: msg.Kind, VideoQuality: msg.VideoQuality})
 		if err != nil {
 			return outMsg{Type: "error", Message: err.Error()}
 		}

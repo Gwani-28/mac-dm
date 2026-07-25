@@ -22,7 +22,8 @@ import (
 const usage = `dm — 분할 다운로드 매니저
 
 ■ 데몬 경유 (큐·동시성·속도제한, 권장)
-  dm add [-c 커넥션] [-o 경로] <URL>   작업 추가 (데몬이 없으면 자동 시작)
+  dm add [-c 커넥션] [-o 경로] [-q 화질] <URL>
+                                       작업 추가 (데몬이 없으면 자동 시작)
   dm list                              작업 목록·진행률
   dm show <ID>                         분할 커넥션별 진행률 (IDM식)
   dm pause <ID>                        일시정지
@@ -37,13 +38,15 @@ const usage = `dm — 분할 다운로드 매니저
   dm daemon run                        포그라운드 실행 (디버그용)
 
 ■ 직접 다운로드 (데몬 없이 즉석에서)
-  dm download [-c 커넥션] [-o 경로] <URL>
+  dm download [-c 커넥션] [-o 경로] [-q 화질] <URL>
 
 공통 동작:
   - Range 지원 서버는 분할 동시 다운로드, 미지원이면 단일 커넥션 폴백.
   - 중단(일시정지·Ctrl+C·데몬 재시작)되어도 받던 지점부터 이어받는다.
   - 완료 시 크기를 검증한다. 기본 저장 위치: 데몬 작업은 ~/Downloads,
     직접 다운로드는 현재 폴더.
+  - 유튜브 등 영상 화질(-q): auto(QuickTime 호환 MP4 우선, 기본), best,
+    2160p, 1440p, 1080p, 720p, 480p, 360p.
 `
 
 func main() {
@@ -91,6 +94,7 @@ func runDownload(args []string) {
 	fs := flag.NewFlagSet("download", flag.ExitOnError)
 	conns := fs.Int("c", 8, "동시 커넥션 수")
 	out := fs.String("o", "", "저장 경로")
+	quality := fs.String("q", "auto", "영상 화질(auto,best,2160p,1440p,1080p,720p,480p,360p)")
 	fs.Usage = func() { fmt.Fprint(os.Stderr, usage) }
 	fs.Parse(args)
 
@@ -107,10 +111,11 @@ func runDownload(args []string) {
 	defer stop()
 
 	err := downloader.Run(ctx, downloader.Options{
-		URL:         fs.Arg(0),
-		Output:      *out,
-		Connections: *conns,
-		Progress:    os.Stderr,
+		URL:          fs.Arg(0),
+		Output:       *out,
+		Connections:  *conns,
+		VideoQuality: *quality,
+		Progress:     os.Stderr,
 	})
 	if err != nil {
 		if ctx.Err() != nil {
@@ -136,6 +141,7 @@ func runAdd(args []string) {
 	fs := flag.NewFlagSet("add", flag.ExitOnError)
 	conns := fs.Int("c", 8, "동시 커넥션 수")
 	out := fs.String("o", "", "저장 경로 (기본: ~/Downloads)")
+	quality := fs.String("q", "auto", "영상 화질(auto,best,2160p,1440p,1080p,720p,480p,360p)")
 	fs.Usage = func() { fmt.Fprint(os.Stderr, usage) }
 	fs.Parse(args)
 	if fs.NArg() != 1 {
@@ -147,7 +153,7 @@ func runAdd(args []string) {
 	if err := c.EnsureDaemon(); err != nil {
 		fatal(err)
 	}
-	j, err := c.Add(api.AddJobRequest{URL: fs.Arg(0), Output: *out, Connections: *conns})
+	j, err := c.Add(api.AddJobRequest{URL: fs.Arg(0), Output: *out, Connections: *conns, VideoQuality: *quality})
 	if err != nil {
 		fatal(err)
 	}
@@ -205,10 +211,18 @@ func runShow(args []string) {
 	}
 	if len(j.Segments) == 0 {
 		conns := j.Connections
+		if j.Kind == "video" {
+			fmt.Printf("\n  (영상 조각 정보 없음 — 완료됐거나 yt-dlp가 조각 수를 아직 안 보낸 상태, 설정 %d개)\n", conns)
+			return
+		}
 		fmt.Printf("\n  (분할 커넥션 정보 없음 — 진행 중이 아니거나 단일 커넥션, 설정 %d개)\n", conns)
 		return
 	}
-	fmt.Printf("\n  커넥션 %d개:\n", len(j.Segments))
+	if j.Kind == "video" {
+		fmt.Printf("\n  영상 조각 병렬 슬롯 %d개:\n", len(j.Segments))
+	} else {
+		fmt.Printf("\n  커넥션 %d개:\n", len(j.Segments))
+	}
 	for i, s := range j.Segments {
 		total := s.End - s.Start + 1
 		pct := 0.0
@@ -260,6 +274,12 @@ func statusKo(s api.JobStatus) string {
 func progressCell(j api.Job) string {
 	if j.Status == api.StatusDone {
 		return fmt.Sprintf("100%% (%s)", formatBytes(j.TotalBytes))
+	}
+	if j.Percent > 0 {
+		if j.DoneBytes > 0 {
+			return fmt.Sprintf("%.1f%% (%s)", j.Percent, formatBytes(j.DoneBytes))
+		}
+		return fmt.Sprintf("%.1f%%", j.Percent)
 	}
 	if j.TotalBytes > 0 {
 		return fmt.Sprintf("%.1f%% (%s/%s)",

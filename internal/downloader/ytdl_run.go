@@ -36,22 +36,33 @@ func runYTDL(ctx context.Context, opt Options) error {
 	counters.Done.Store(0)
 
 	if opt.Progress != nil {
-		fmt.Fprintln(opt.Progress, "스트리밍 영상 감지 — yt-dlp로 받습니다 (최고화질 영상+음성 병합).")
+		q, _ := ytdl.NormalizeQuality(opt.VideoQuality)
+		fmt.Fprintf(opt.Progress, "스트리밍 영상 감지 — yt-dlp로 받습니다 (화질: %s).\n", q)
 	}
 
 	var lastPrinted atomic.Int64
 	stop := startYTDLProgress(ctx, opt.Progress, counters)
 
 	final, err := ytdl.Download(ctx, ytdl.Options{
-		URL:     opt.URL,
-		Dir:     dir,
-		Headers: opt.Headers,
-		OnProgress: func(done, total int64) {
-			counters.Done.Store(done)
-			if total > 0 {
-				counters.Total.Store(total)
+		URL:       opt.URL,
+		Dir:       dir,
+		Quality:   opt.VideoQuality,
+		Fragments: opt.Connections,
+		Headers:   opt.Headers,
+		OnProgress: func(ev ytdl.ProgressEvent) {
+			if ev.Done > 0 {
+				counters.Done.Store(ev.Done)
+				lastPrinted.Store(ev.Done)
 			}
-			lastPrinted.Store(done)
+			if ev.Total > 0 {
+				counters.Total.Store(ev.Total)
+			}
+			if ev.Percent > 0 {
+				counters.PercentMilli.Store(int64(ev.Percent * 1000))
+			}
+			if ev.FragmentCount > 1 {
+				counters.setSegments(ytdlFragmentSegments(ev.FragmentIndex, ev.FragmentCount, opt.Connections))
+			}
 		},
 		OnFile: func(p string) {
 			if opt.OnOutputResolved != nil {
@@ -77,6 +88,51 @@ func runYTDL(ctx context.Context, opt Options) error {
 	return nil
 }
 
+func ytdlFragmentSegments(done, count, lanes int) []SegmentStat {
+	if count <= 1 {
+		return nil
+	}
+	if lanes <= 0 {
+		lanes = 8
+	}
+	if lanes > count {
+		lanes = count
+	}
+	if lanes > 16 {
+		lanes = 16
+	}
+	if done < 0 {
+		done = 0
+	}
+	if done > count {
+		done = count
+	}
+
+	out := make([]SegmentStat, 0, lanes)
+	base := count / lanes
+	rem := count % lanes
+	start := int64(0)
+	left := done
+	for i := 0; i < lanes; i++ {
+		total := base
+		if i < rem {
+			total++
+		}
+		segDone := 0
+		if left > 0 {
+			segDone = total
+			if left < total {
+				segDone = left
+			}
+			left -= segDone
+		}
+		end := start + int64(total) - 1
+		out = append(out, SegmentStat{Start: start, End: end, Done: int64(segDone)})
+		start = end + 1
+	}
+	return out
+}
+
 func startYTDLProgress(ctx context.Context, w interface{ Write([]byte) (int, error) }, counters *Progress) func() {
 	if w == nil {
 		return func() {}
@@ -94,9 +150,16 @@ func startYTDLProgress(ctx context.Context, w interface{ Write([]byte) (int, err
 			case <-ticker.C:
 				done := counters.Done.Load()
 				total := counters.Total.Load()
+				percent := float64(counters.PercentMilli.Load()) / 1000
 				if total > 0 {
 					fmt.Fprintf(w, "\r%5.1f%%  %s / %s   ",
 						float64(done)/float64(total)*100, formatBytes(done), formatBytes(total))
+				} else if percent > 0 {
+					if done > 0 {
+						fmt.Fprintf(w, "\r%5.1f%%  %s 받는 중   ", percent, formatBytes(done))
+					} else {
+						fmt.Fprintf(w, "\r%5.1f%% 받는 중   ", percent)
+					}
 				} else {
 					fmt.Fprintf(w, "\r%s 받는 중   ", formatBytes(done))
 				}

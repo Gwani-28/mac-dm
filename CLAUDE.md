@@ -79,7 +79,10 @@ cd "IDM MAC" && ./scripts/install.sh
   `dm show <ID>`가 커넥션별 막대·퍼센트, GUI가 미니 막대 그리드, `dm download` 직접 실행은 멀티라인 라이브.
 - **유튜브/스트리밍 (yt-dlp)**: 새 외부 도구 yt-dlp **운영자 승인하에 추가**(ffmpeg만으로는 유튜브 n-param
   암호화를 못 풀어 불가). `internal/ytdl`이 감싸고, `IsVideoSite`(youtube·vimeo·twitch·tiktok 등) 또는
-  확장의 kind=video로 라우팅. 최고화질 영상+음성을 ffmpeg로 mp4 병합. 확장은 영상 사이트 페이지를 감지해
+  확장의 kind=video로 라우팅. 화질은 auto/best/2160p/1440p/1080p/720p/480p/360p 중 선택 가능하고,
+  auto·해상도 지정 모드는 QuickTime 호환 H.264/AAC 조합을 우선 선택하며 결과가 AV1/VP9/Opus면
+  ffmpeg로 H.264/AAC MP4 변환. YouTube 진행률은 yt-dlp 퍼센트와 병렬 조각 슬롯으로 표시한다.
+  확장은 영상 사이트 페이지를 감지해
   페이지 URL을 통째로 넘긴다(일반 가로채기로는 DASH가 안 잡힘). 검증: "Me at the zoo" 실제 다운로드 성공.
 - **GUI 폴더에서 보기**: 완료 작업에 Finder 표시(`open -R`) 버튼.
 - 의존성 정책: 외부 도구는 ffmpeg·yt-dlp 둘 뿐(둘 다 exec 호출, brew). Go 라이브러리 의존성은 여전히 0.

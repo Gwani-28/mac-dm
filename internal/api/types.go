@@ -16,19 +16,21 @@ const (
 )
 
 type Job struct {
-	ID          string     `json:"id"`
-	URL         string     `json:"url"`
-	Output      string     `json:"output"` // 최종 저장 경로 (확정 전이면 폴더)
-	Connections int        `json:"connections"`
-	Category    string     `json:"category"`
-	Kind        string     `json:"kind,omitempty"` // "" / "video"(yt-dlp 경로)
-	Status      JobStatus  `json:"status"`
-	Error       string     `json:"error,omitempty"`
-	TotalBytes  int64      `json:"total_bytes"` // -1 = 아직 모름
-	DoneBytes   int64      `json:"done_bytes"`
-	Speed       int64      `json:"speed"` // bytes/sec (active일 때만 의미)
-	AddedAt     time.Time  `json:"added_at"`
-	FinishedAt  *time.Time `json:"finished_at,omitempty"`
+	ID           string     `json:"id"`
+	URL          string     `json:"url"`
+	Output       string     `json:"output"` // 최종 저장 경로 (확정 전이면 폴더)
+	Connections  int        `json:"connections"`
+	Category     string     `json:"category"`
+	Kind         string     `json:"kind,omitempty"`          // "" / "video"(yt-dlp 경로)
+	VideoQuality string     `json:"video_quality,omitempty"` // yt-dlp 영상 화질(auto/best/1080p 등)
+	Status       JobStatus  `json:"status"`
+	Error        string     `json:"error,omitempty"`
+	Percent      float64    `json:"percent,omitempty"` // 스트리밍 영상처럼 전체 바이트를 모를 때 쓰는 진행률
+	TotalBytes   int64      `json:"total_bytes"`       // -1 = 아직 모름
+	DoneBytes    int64      `json:"done_bytes"`
+	Speed        int64      `json:"speed"` // bytes/sec (active일 때만 의미)
+	AddedAt      time.Time  `json:"added_at"`
+	FinishedAt   *time.Time `json:"finished_at,omitempty"`
 	// 분할 구간별 진행 (active일 때만 채워짐). IDM식 커넥션별 퍼센트 표시용.
 	Segments []SegmentProgress `json:"segments,omitempty"`
 	// 요청 헤더 (쿠키 포함 가능 — jobs.json은 0600 권한). 이어받기에 필요해서 저장한다.
@@ -43,11 +45,12 @@ type SegmentProgress struct {
 }
 
 type AddJobRequest struct {
-	URL         string            `json:"url"`
-	Output      string            `json:"output,omitempty"`
-	Connections int               `json:"connections,omitempty"`
-	Headers     map[string]string `json:"headers,omitempty"` // 쿠키·Referer 등 (크롬 연동)
-	Kind        string            `json:"kind,omitempty"`    // "" / "video"(yt-dlp 강제)
+	URL          string            `json:"url"`
+	Output       string            `json:"output,omitempty"`
+	Connections  int               `json:"connections,omitempty"`
+	Headers      map[string]string `json:"headers,omitempty"`       // 쿠키·Referer 등 (크롬 연동)
+	Kind         string            `json:"kind,omitempty"`          // "" / "video"(yt-dlp 강제)
+	VideoQuality string            `json:"video_quality,omitempty"` // auto/best/2160p/1440p/1080p/720p/480p/360p
 }
 
 // ConfigRequest의 nil 필드는 "변경 없음".

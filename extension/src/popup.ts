@@ -5,10 +5,12 @@ const HOST = "com.macdm.host";
 const toggle = document.getElementById("toggle") as HTMLInputElement;
 const stateEl = document.getElementById("state") as HTMLElement;
 const daemonEl = document.getElementById("daemon") as HTMLElement;
+const qualitySelect = document.getElementById("quality") as HTMLSelectElement;
 
 async function load(): Promise<void> {
-  const o = await chrome.storage.local.get({ enabled: true });
+  const o = await chrome.storage.local.get({ enabled: true, videoQuality: "auto" });
   toggle.checked = !!o.enabled;
+  qualitySelect.value = String(o.videoQuality || "auto");
   stateEl.textContent = toggle.checked ? "가로채기 켜짐" : "가로채기 꺼짐";
 
   try {
@@ -30,19 +32,23 @@ toggle.addEventListener("change", async () => {
   await chrome.storage.local.set({ enabled: toggle.checked });
   stateEl.textContent = toggle.checked ? "가로채기 켜짐" : "가로채기 꺼짐";
 });
+qualitySelect.addEventListener("change", async () => {
+  await chrome.storage.local.set({ videoQuality: qualitySelect.value });
+});
 
 // 영상 감지 시(유튜브 페이지 또는 HLS) "영상 받기" 버튼 노출
 const captureBtn = document.getElementById("capture") as HTMLButtonElement;
 chrome.runtime.sendMessage({ type: "get-stream" }, (resp) => {
   if (resp?.url) {
     captureBtn.style.display = "block";
-    captureBtn.textContent = resp.kind === "video" ? "▶ 이 영상 받기 (최고화질)" : "▶ 이 페이지의 영상 받기";
+    qualitySelect.disabled = resp.kind !== "video";
+    captureBtn.textContent = resp.kind === "video" ? "▶ 이 영상 받기" : "▶ 이 페이지의 영상 받기";
   }
 });
 captureBtn.addEventListener("click", () => {
   captureBtn.disabled = true;
   captureBtn.textContent = "전달 중…";
-  chrome.runtime.sendMessage({ type: "capture-stream" }, (resp) => {
+  chrome.runtime.sendMessage({ type: "capture-stream", videoQuality: qualitySelect.value }, (resp) => {
     if (resp?.ok) {
       captureBtn.textContent = "✅ Mac DM으로 전달됨";
     } else {

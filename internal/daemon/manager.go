@@ -22,6 +22,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -56,9 +57,9 @@ type Manager struct {
 	maxActive int
 	limiter   *ratelimit.Limiter
 
-	wg      sync.WaitGroup // 실행 중인 작업 고루틴
+	wg       sync.WaitGroup // 실행 중인 작업 고루틴
 	tickStop chan struct{}
-	closed  bool
+	closed   bool
 }
 
 // NewManager는 저장된 상태를 복원하고 스케줄링을 시작한다.
@@ -112,24 +113,35 @@ func (m *Manager) Add(req api.AddJobRequest) (api.Job, error) {
 		out = m.outDir
 	}
 	category := api.Categorize(req.URL)
-	if req.Kind == "video" || downloader.IsVideoSite(req.URL) {
+	if req.Kind == "video" && !downloader.IsVideoSite(req.URL) {
+		req.Kind = ""
+	}
+	if downloader.IsVideoSite(req.URL) {
 		req.Kind = "video"
 		category = api.CategoryVideo
+		q, err := downloader.NormalizeVideoQuality(req.VideoQuality)
+		if err != nil {
+			return api.Job{}, err
+		}
+		req.VideoQuality = q
+	} else {
+		req.VideoQuality = ""
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.nextID++
 	j := &job{Job: api.Job{
-		ID:          strconv.Itoa(m.nextID),
-		URL:         req.URL,
-		Output:      out,
-		Connections: req.Connections,
-		Category:    category,
-		Kind:        req.Kind,
-		Status:      api.StatusQueued,
-		TotalBytes:  -1,
-		AddedAt:     time.Now(),
-		Headers:     req.Headers,
+		ID:           strconv.Itoa(m.nextID),
+		URL:          req.URL,
+		Output:       out,
+		Connections:  req.Connections,
+		Category:     category,
+		Kind:         req.Kind,
+		VideoQuality: req.VideoQuality,
+		Status:       api.StatusQueued,
+		TotalBytes:   -1,
+		AddedAt:      time.Now(),
+		Headers:      req.Headers,
 	}}
 	m.jobs[j.ID] = j
 	m.order = append(m.order, j.ID)
@@ -311,6 +323,7 @@ func (m *Manager) startLocked(j *job) {
 	j.Status = api.StatusActive
 	j.intent = ""
 	j.Error = ""
+	j.Percent = 0
 	j.cancel = cancel
 	j.counters = &downloader.Progress{}
 	j.lastBytes = j.DoneBytes
@@ -322,13 +335,14 @@ func (m *Manager) startLocked(j *job) {
 func (m *Manager) runJob(ctx context.Context, j *job) {
 	defer m.wg.Done()
 	err := downloader.Run(ctx, downloader.Options{
-		URL:         j.URL,
-		Output:      j.Output,
-		Connections: j.Connections,
-		Headers:     j.Headers,
-		Kind:        j.Kind,
-		Counters:    j.counters,
-		Limiter:     m.limiter,
+		URL:          j.URL,
+		Output:       j.Output,
+		Connections:  j.Connections,
+		Headers:      j.Headers,
+		Kind:         j.Kind,
+		VideoQuality: j.VideoQuality,
+		Counters:     j.counters,
+		Limiter:      m.limiter,
 		OnOutputResolved: func(p string) {
 			m.mu.Lock()
 			j.Output = p // 확정 경로 저장 → 재시작해도 같은 .part를 이어받는다
@@ -346,6 +360,7 @@ func (m *Manager) runJob(ctx context.Context, j *job) {
 	switch {
 	case err == nil:
 		j.Status = api.StatusDone
+		j.Percent = 100
 		now := time.Now()
 		j.FinishedAt = &now
 		// 최종 파일 크기로 확정 (스트리밍 영상은 진행 중 전체 크기를 모를 수 있다).
@@ -383,6 +398,9 @@ func (m *Manager) refreshLocked(j *job) {
 	j.DoneBytes = j.counters.Done.Load()
 	if t := j.counters.Total.Load(); t != 0 {
 		j.TotalBytes = t
+	}
+	if p := j.counters.PercentMilli.Load(); p > 0 {
+		j.Percent = float64(p) / 1000
 	}
 	if segs := j.counters.Segments(); segs != nil {
 		out := make([]api.SegmentProgress, len(segs))
@@ -481,6 +499,7 @@ func (m *Manager) loadState() error {
 	m.limiter.SetRate(st.SpeedLimit)
 	for i := range st.Jobs {
 		jb := st.Jobs[i]
+		m.normalizePersistedJob(&jb)
 		if jb.Status == api.StatusActive {
 			// 데몬이 죽기 전 받던 작업 → 큐로 복귀, 이어받기는 .dm.json이 처리
 			jb.Status = api.StatusQueued
@@ -502,4 +521,23 @@ func (m *Manager) loadState() error {
 		return m.jobs[m.order[a]].AddedAt.Before(m.jobs[m.order[b]].AddedAt)
 	})
 	return nil
+}
+
+func (m *Manager) normalizePersistedJob(j *api.Job) {
+	if downloader.IsVideoSite(j.URL) {
+		j.Kind = "video"
+		j.Category = api.CategoryVideo
+		if j.VideoQuality == "" {
+			j.VideoQuality = "auto"
+		}
+		return
+	}
+	if j.Kind == "video" {
+		j.Kind = ""
+		j.VideoQuality = ""
+		j.Category = api.Categorize(j.URL)
+	}
+	if j.Status == api.StatusFailed && strings.Contains(j.Error, "yt-dlp") {
+		j.Error = "이전 버전에서 영상 사이트로 오인된 작업입니다. 재개하면 일반 다운로드로 다시 시도합니다."
+	}
 }

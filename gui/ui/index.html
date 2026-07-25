@@ -12,6 +12,16 @@
   <header class="topbar">
     <form id="add-form" autocomplete="off">
       <input id="url-input" type="text" placeholder="다운로드 URL을 붙여넣으세요 (http://, https://)" spellcheck="false" />
+      <select id="quality-select" aria-label="영상 화질">
+        <option value="auto" selected>자동 MP4</option>
+        <option value="best">최고화질</option>
+        <option value="2160p">2160p</option>
+        <option value="1440p">1440p</option>
+        <option value="1080p">1080p</option>
+        <option value="720p">720p</option>
+        <option value="480p">480p</option>
+        <option value="360p">360p</option>
+      </select>
       <button type="submit" class="primary">＋ 추가</button>
     </form>
   </header>

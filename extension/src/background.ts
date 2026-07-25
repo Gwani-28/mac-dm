@@ -46,7 +46,7 @@ async function buildHeaders(url: string, referrer?: string): Promise<Record<stri
   return headers;
 }
 
-async function sendToDaemon(url: string, referrer?: string, kind?: string): Promise<HostResponse> {
+async function sendToDaemon(url: string, referrer?: string, kind?: string, videoQuality?: string): Promise<HostResponse> {
   // 영상 사이트(yt-dlp 경로)는 쿠키·UA를 넘기지 않는다 — yt-dlp가 자체 클라이언트를
   // 쓰므로 브라우저 헤더를 강제하면 오히려 다운로드가 깨진다. 일반 파일만 헤더 전달.
   const headers = kind === "video" ? undefined : await buildHeaders(url, referrer);
@@ -55,6 +55,7 @@ async function sendToDaemon(url: string, referrer?: string, kind?: string): Prom
     url,
     headers,
     kind,
+    video_quality: videoQuality,
   })) as HostResponse;
 }
 
@@ -207,7 +208,7 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
         return;
       }
       try {
-        const resp = await sendToDaemon(src.url, src.referrer, src.kind);
+        const resp = await sendToDaemon(src.url, src.referrer, src.kind, msg.videoQuality);
         if (resp?.type !== "added") throw new Error(resp?.message || "호스트 응답 없음");
         notify(`Mac DM이 영상을 받는 중 (작업 ${resp.id})`);
         sendResponse({ ok: true, id: resp.id });

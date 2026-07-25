@@ -16,7 +16,7 @@ import (
 	"mac-dm/internal/api"
 )
 
-const Version = "0.2-g2"
+const Version = "0.6-ytdl-qt"
 
 // Dir은 데몬의 상태 디렉토리(~/.mac-dm). 소켓·pid·로그·jobs.json이 모인다.
 func Dir() (string, error) {

@@ -24,8 +24,8 @@ fn socket_path() -> Result<PathBuf, String> {
 /// 유닉스 소켓 위로 HTTP/1.0 요청 한 번. (status, body) 반환.
 fn raw_request(method: &str, path: &str, body: Option<&str>) -> Result<(u16, String), String> {
     let sock = socket_path()?;
-    let mut stream = UnixStream::connect(&sock)
-        .map_err(|e| format!("데몬에 연결할 수 없습니다: {e}"))?;
+    let mut stream =
+        UnixStream::connect(&sock).map_err(|e| format!("데몬에 연결할 수 없습니다: {e}"))?;
     stream
         .set_read_timeout(Some(Duration::from_secs(10)))
         .map_err(|e| e.to_string())?;
@@ -39,7 +39,9 @@ fn raw_request(method: &str, path: &str, body: Option<&str>) -> Result<(u16, Str
         b.len(),
         b
     );
-    stream.write_all(req.as_bytes()).map_err(|e| e.to_string())?;
+    stream
+        .write_all(req.as_bytes())
+        .map_err(|e| e.to_string())?;
 
     let mut raw = Vec::new();
     stream.read_to_end(&mut raw).map_err(|e| e.to_string())?;
@@ -78,6 +80,32 @@ fn daemon_alive() -> bool {
     raw_request("GET", "/status", None).is_ok()
 }
 
+fn valid_job_id(id: &str) -> bool {
+    !id.is_empty() && id.bytes().all(|b| b.is_ascii_digit())
+}
+
+fn allowed_api_path(method: &str, path: &str) -> bool {
+    if !path.starts_with('/') || path.bytes().any(|b| b.is_ascii_whitespace()) {
+        return false;
+    }
+
+    match (method, path) {
+        ("GET", "/status") | ("GET", "/jobs") | ("POST", "/jobs") | ("POST", "/config") => {
+            return true;
+        }
+        _ => {}
+    }
+
+    let parts: Vec<&str> = path.split('/').collect();
+    match (method, parts.as_slice()) {
+        ("GET", ["", "jobs", id]) | ("DELETE", ["", "jobs", id]) => valid_job_id(id),
+        ("POST", ["", "jobs", id, action]) => {
+            valid_job_id(id) && matches!(*action, "pause" | "resume" | "cancel")
+        }
+        _ => false,
+    }
+}
+
 /// dm 바이너리를 찾는다: DM_BIN 환경변수 → ~/.mac-dm/bin/dm → 흔한 경로 → PATH.
 fn find_dm_binary() -> Option<PathBuf> {
     if let Ok(p) = std::env::var("DM_BIN") {
@@ -98,7 +126,10 @@ fn find_dm_binary() -> Option<PathBuf> {
             return Some(pb);
         }
     }
-    let out = std::process::Command::new("/usr/bin/which").arg("dm").output().ok()?;
+    let out = std::process::Command::new("/usr/bin/which")
+        .arg("dm")
+        .output()
+        .ok()?;
     if out.status.success() {
         let s = String::from_utf8_lossy(&out.stdout).trim().to_string();
         if !s.is_empty() {
@@ -112,17 +143,26 @@ fn find_dm_binary() -> Option<PathBuf> {
 
 #[tauri::command]
 fn api_get(path: String) -> Result<serde_json::Value, String> {
+    if !allowed_api_path("GET", &path) {
+        return Err("허용되지 않은 API 경로입니다".to_string());
+    }
     request_json("GET", &path, None)
 }
 
 #[tauri::command]
 fn api_post(path: String, body: Option<serde_json::Value>) -> Result<serde_json::Value, String> {
+    if !allowed_api_path("POST", &path) {
+        return Err("허용되지 않은 API 경로입니다".to_string());
+    }
     let b = body.map(|v| v.to_string());
     request_json("POST", &path, b.as_deref())
 }
 
 #[tauri::command]
 fn api_delete(path: String) -> Result<serde_json::Value, String> {
+    if !allowed_api_path("DELETE", &path) {
+        return Err("허용되지 않은 API 경로입니다".to_string());
+    }
     request_json("DELETE", &path, None)
 }
 

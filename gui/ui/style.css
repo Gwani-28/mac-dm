@@ -60,6 +60,17 @@ body {
   outline: none;
 }
 #url-input:focus { border-color: var(--accent); }
+#quality-select {
+  width: 104px;
+  padding: 8px 8px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  font-size: 12.5px;
+  background: var(--bg);
+  color: var(--text);
+  outline: none;
+}
+#quality-select:focus { border-color: var(--accent); }
 
 button {
   font-family: inherit;
@@ -176,6 +187,7 @@ button.primary:hover { filter: brightness(1.1); }
 .job-bottom { display: flex; align-items: center; gap: 10px; color: var(--muted); font-size: 12px; }
 .job-bottom .grow { flex: 1; }
 .job-bottom .conns { font-size: 11px; color: var(--accent); font-weight: 600; }
+.job-bottom .quality { font-size: 11px; color: var(--muted); }
 
 /* IDM식 분할 커넥션별 진행 막대 */
 .segs {

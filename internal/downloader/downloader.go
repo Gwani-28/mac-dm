@@ -37,12 +37,13 @@ import (
 
 // Options는 한 번의 다운로드 실행 설정.
 type Options struct {
-	URL         string
-	Output      string            // 비우면 서버/URL에서 파일명 결정, 현재 폴더에 저장
-	Connections int               // 분할 커넥션 수 (기본 8)
-	Headers     map[string]string // 요청에 실을 추가 헤더 (쿠키·Referer 등, 크롬 연동용)
-	Kind        string            // "" / "video"(yt-dlp 강제). 크롬 "영상 받기"가 설정
-	Progress    io.Writer         // 진행률 출력 대상. nil이면 출력 없음
+	URL          string
+	Output       string            // 비우면 서버/URL에서 파일명 결정, 현재 폴더에 저장
+	Connections  int               // 분할 커넥션 수 (기본 8)
+	Headers      map[string]string // 요청에 실을 추가 헤더 (쿠키·Referer 등, 크롬 연동용)
+	Kind         string            // "" / "video"(yt-dlp 강제). 크롬 "영상 받기"가 설정
+	VideoQuality string            // yt-dlp 영상 화질(auto/best/1080p 등)
+	Progress     io.Writer         // 진행률 출력 대상. nil이면 출력 없음
 
 	// 아래는 데몬(G2)이 다운로드를 관제하기 위한 훅. CLI 직접 실행에선 전부 nil.
 	Counters         *Progress    // 진행 바이트/전체 크기를 외부에서 읽을 수 있게 공유
@@ -56,10 +57,14 @@ func IsHLS(url string) bool { return hls.IsManifestURL(url) }
 // IsVideoSite는 yt-dlp로 보낼 스트리밍 사이트(유튜브 등)인지 판단한다.
 func IsVideoSite(url string) bool { return ytdl.IsVideoSite(url) }
 
+// NormalizeVideoQuality는 yt-dlp 영상 화질 옵션을 표준값으로 바꾼다.
+func NormalizeVideoQuality(q string) (string, error) { return ytdl.NormalizeQuality(q) }
+
 // Progress는 외부 관찰자(데몬)가 읽는 진행 카운터.
 type Progress struct {
-	Total atomic.Int64 // -1 = 아직 모름
-	Done  atomic.Int64
+	Total        atomic.Int64 // -1 = 아직 모름
+	Done         atomic.Int64
+	PercentMilli atomic.Int64 // 0 = 미상, 100000 = 100.000%
 
 	mu   sync.Mutex
 	segs []SegmentStat // 구간별 진행 스냅샷 (분할 다운로드일 때만)
