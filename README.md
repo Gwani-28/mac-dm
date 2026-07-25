@@ -8,6 +8,8 @@ support via `yt-dlp`. CLI, GUI, and browser all drive **one shared engine**.
 ![Platform: macOS](https://img.shields.io/badge/platform-macOS-lightgrey.svg)
 ![Go](https://img.shields.io/badge/engine-Go-00ADD8.svg)
 
+**English** | [한국어](README.ko.md)
+
 > Built for personal use. You are responsible for complying with the terms of
 > service and copyright of any site you download from. See
 > [Responsible use](#responsible-use).
@@ -167,29 +169,4 @@ It does **not** circumvent DRM or access protected content.
 
 ---
 
-## 한국어 요약
-
-**Mac DM** — 맥용 IDM 스타일 다운로드 매니저. 멀티 커넥션 분할 다운로드 · 이어받기 ·
-크롬 가로채기 · HLS/스트림 저장 · 유튜브(`yt-dlp`) 지원. CLI·GUI·크롬이 **하나의
-공유 데몬**을 함께 씁니다.
-
-**핵심 기능**: 분할 동시 다운로드(기본 8, Range 미지원 시 단일 폴백) · 어디서 끊겨도
-이어받기 · 커넥션별 진행률(IDM식, `dm show`) · 백그라운드 데몬 + 큐/동시성/속도제한 ·
-크롬 다운로드 자동 가로채기 · HLS(ffmpeg) · 유튜브 등 1000+ 사이트(yt-dlp, 화질 선택) ·
-카테고리 자동 분류.
-
-**설치**:
-
-```bash
-git clone https://github.com/Gwani-28/mac-dm.git
-cd mac-dm && ./scripts/install.sh
-```
-
-이후 크롬에서 `chrome://extensions` → 개발자 모드 → "압축해제된 확장 프로그램을 로드"
-→ `extension/` 폴더. 제거는 `./scripts/uninstall.sh`.
-
-**책임 있는 사용**: 스트리밍 사이트에서 받을 때는 각 사이트 약관과 저작권을 사용자가
-직접 확인해야 합니다. 받을 권리가 있는 콘텐츠에만 사용하세요. DRM 우회·보호 콘텐츠는
-다루지 않습니다.
-
-라이선스: [MIT](LICENSE).
+🇰🇷 **한국어 문서:** [README.ko.md](README.ko.md)
