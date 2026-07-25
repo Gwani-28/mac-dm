@@ -1,68 +1,195 @@
-# Mac DM — 맥 다운로드 매니저
+# Mac DM
 
-IDM 스타일의 개인용 맥 다운로드 매니저. 멀티 커넥션 분할 다운로드 + 이어받기 +
-크롬 가로채기 + HLS(m3u8) 스트림 저장.
+A fast, IDM-style download manager for macOS — multi-connection segmented
+downloads, resume, a Chrome capture extension, HLS/stream saving, and YouTube
+support via `yt-dlp`. CLI, GUI, and browser all drive **one shared engine**.
 
-## 구조 (독립 데몬 아키텍처)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+![Platform: macOS](https://img.shields.io/badge/platform-macOS-lightgrey.svg)
+![Go](https://img.shields.io/badge/engine-Go-00ADD8.svg)
+
+> Built for personal use. You are responsible for complying with the terms of
+> service and copyright of any site you download from. See
+> [Responsible use](#responsible-use).
+
+## Features
+
+- **Segmented downloads** — splits a file into N parallel HTTP `Range`
+  connections (default 8) for higher throughput; automatically falls back to a
+  single connection when the server doesn't support ranges.
+- **Resume** — interrupt any download (Ctrl-C, pause, crash, reboot) and it
+  continues from where it left off. Restart-safe: the daemon rebuilds its queue
+  from disk and finishes in-flight jobs.
+- **Per-connection progress (IDM-style)** — see each connection's own bar and
+  percentage in the GUI, or with `dm show <id>` in the terminal.
+- **Background daemon** — the engine runs as a headless daemon over a local
+  Unix socket. CLI, GUI, and the Chrome extension are all thin clients of the
+  same daemon, so a download added anywhere shows up everywhere.
+- **Queue, concurrency & rate limiting** — cap simultaneous downloads
+  (`dm concurrent N`) and total speed (`dm limit 2M`), shared across all jobs.
+- **Chrome capture** — an extension intercepts browser downloads and hands them
+  to the daemon (passing cookies/referer for authenticated files).
+- **HLS / streams** — detects `.m3u8` and downloads + merges with `ffmpeg`.
+- **YouTube & 1000+ sites** — routes streaming-site URLs to `yt-dlp`, picks the
+  best video+audio, and merges to a QuickTime-friendly MP4. Optional quality
+  selection (`auto`, `1080p`, `720p`, …).
+- **Categories** — downloads auto-sort into video / audio / image / doc /
+  archive / app, with a sidebar filter in the GUI.
+
+## Architecture
 
 ```
-크롬 확장(TS) ─┐
-GUI(Tauri)   ─┼─→  데몬 (Go, ~/.mac-dm/dm.sock)  ──→  다운로드 엔진
-CLI(dm)      ─┘         큐·동시성·속도제한·복원         (Range 분할 / 이어받기 / HLS)
+Chrome extension (TS) ─┐
+GUI (Tauri)           ─┼─►  daemon (Go, ~/.mac-dm/dm.sock)  ─►  download engine
+CLI (dm)              ─┘        queue · concurrency · rate         Range split / resume
+                               limit · restart recovery           HLS (ffmpeg) / yt-dlp
 ```
 
-엔진은 GUI나 확장에 묶이지 않은 독립 데몬이다. 모든 클라이언트가 같은 데몬에 붙으므로
-CLI에서 추가한 다운로드가 GUI에도, 크롬이 가로챈 다운로드가 CLI `dm list`에도 보인다.
+The engine is a standalone daemon, not embedded in the GUI or the extension.
+Every client attaches to the same daemon over a private, user-only Unix socket
+(`~/.mac-dm/dm.sock`), so state is consistent no matter how a download was
+started.
 
-## 설치
+## Requirements
 
-```
-cd "IDM MAC"
+- **macOS**
+- **Runtime tools** (installed automatically by `install.sh` via Homebrew):
+  - [`ffmpeg`](https://ffmpeg.org/) — HLS merging & MP4 remux
+  - [`yt-dlp`](https://github.com/yt-dlp/yt-dlp) — streaming-site downloads
+- **To build from source:**
+  - [Go](https://go.dev/) 1.23+ (engine, CLI, native host)
+  - [Rust](https://www.rust-lang.org/) + [Node.js](https://nodejs.org/) (GUI, via [Tauri 2](https://tauri.app/))
+  - Google Chrome (for the capture extension)
+
+## Install (from source)
+
+```bash
+git clone https://github.com/Gwani-28/mac-dm.git
+cd mac-dm
 ./scripts/install.sh
 ```
 
-그다음 크롬에서 `chrome://extensions` → 개발자 모드 → "압축해제된 확장 프로그램을 로드" → `extension/` 폴더.
+`install.sh` builds `dm` and `dm-host` into `~/.mac-dm/bin`, ensures
+`ffmpeg`/`yt-dlp` are present, builds the GUI (if Rust/Node are available) and
+copies `MacDM.app` to `/Applications`, and registers the Chrome native
+messaging host.
 
-## CLI 사용법
+Then load the Chrome extension:
 
-```
-dm add <URL>             # 데몬에 다운로드 추가 (유튜브 URL이면 yt-dlp 자동 사용)
-dm list                  # 진행률·속도 보기
-dm show <ID>             # 분할 커넥션별 진행률 (IDM식 막대)
+1. Open `chrome://extensions`
+2. Enable **Developer mode**
+3. **Load unpacked** → select the `extension/` folder
+
+Uninstall with `./scripts/uninstall.sh` (add `--purge` to also remove job
+history and logs).
+
+## Usage
+
+### CLI
+
+```bash
+dm add <URL>                 # queue a download (auto-starts the daemon)
+dm add -q 1080p <URL>        # pick a video quality (streaming sites)
+dm list                      # progress & speed for all jobs
+dm show <ID>                 # per-connection bars (IDM-style)
 dm pause / resume / cancel / rm <ID>
-dm limit 2M | off        # 전체 속도 제한
-dm concurrent 3          # 동시 다운로드 개수
-dm daemon start|stop|status
-dm download <URL>        # 데몬 없이 즉석 다운로드 (G1)
-dm host install          # 크롬 네이티브 메시징 호스트 등록
+dm limit 2M | off            # global speed cap
+dm concurrent 3              # max simultaneous downloads
+dm daemon start | stop | status
+dm download <URL>            # one-off download without the daemon
+dm host install              # register the Chrome native messaging host
 ```
 
-## 게이트별 산출물
+### GUI
 
-| 게이트 | 내용 | 위치 |
-|---|---|---|
-| G1 | Range 분할 다운로드 + 이어받기 + 무결성 | `internal/downloader`, `internal/httpclient`, `internal/store` |
-| G2 | 데몬 + 로컬 API + 큐/동시성/속도제한 + 복원 | `internal/daemon`, `internal/api`, `internal/ratelimit`, `internal/client` |
-| G3 | GUI (Tauri) | `gui/` |
-| G4 | 크롬 확장 + 네이티브 메시징 | `extension/`, `cmd/dm-host` |
-| G5 | HLS(m3u8) 감지 + ffmpeg 머징 | `internal/hls` |
-| 보강 | 분할별 진행률(IDM식) · 유튜브(yt-dlp) · 폴더에서 보기 | `internal/ytdl`, `dm show` |
+Launch **MacDM.app**. Paste a URL, pick a quality if it's a video, and manage
+everything (pause/resume/cancel, per-connection progress, category filter,
+speed/concurrency settings) from the window. "Reveal in Finder" on completed
+files.
 
-## 기술 스택
+### Chrome
 
-- 엔진·데몬·CLI·네이티브 호스트: **Go** (외부 라이브러리 의존성 0, 표준 라이브러리만)
-- GUI: **Tauri 2.x** (프런트는 순수 HTML/JS/CSS)
-- 크롬 확장: **TypeScript (Manifest V3)**
-- HLS 머징: 시스템 **ffmpeg** exec 호출
-- 스트리밍 사이트(유튜브 등): 시스템 **yt-dlp** exec 호출 (영상+음성 최고화질 → ffmpeg mp4 병합)
+With the extension loaded, downloads are captured automatically and sent to Mac
+DM. On a video-site page (YouTube, etc.), click the extension → **Download this
+video**. Right-click any link → **Download with Mac DM**.
 
-## 테스트
+## How it works
 
+- **Merge without a merge step.** Instead of downloading N chunk files and
+  concatenating them, the engine pre-allocates the full-size `.part` file and
+  each worker `WriteAt`s its own byte range. Re-downloading a byte always lands
+  at the same offset, so retries and resumes are idempotent and there is no
+  "failed mid-merge" state.
+- **Resume is a single number.** Each segment records how many bytes it has
+  written; the metadata is flushed every second and on interrupt, and never runs
+  ahead of what's on disk. If the server file changed (size/ETag mismatch), the
+  resume is discarded rather than producing a half-old/half-new file.
+- **Streaming split differs.** YouTube isn't a single file — it's separate,
+  signed DASH video/audio streams, so it goes through `yt-dlp` (parallel
+  fragments) rather than HTTP Range. `ffmpeg` merges them into MP4.
+
+## Development
+
+```bash
+go build ./...        # engine, CLI, native host
+go test ./...         # unit + integration tests
+cd gui && npx @tauri-apps/cli dev    # run the GUI in dev mode
+cd extension && npx tsc              # compile the extension TypeScript
 ```
-go test ./...
+
+Layout:
+
+| Path | What |
+|---|---|
+| `cmd/dm` | CLI entry point |
+| `cmd/dm-host` | Chrome native messaging host |
+| `internal/downloader` | segmented download, resume, routing |
+| `internal/daemon` | daemon, queue/scheduler, local HTTP API |
+| `internal/httpclient` / `store` / `ratelimit` | probing, resume metadata, token bucket |
+| `internal/hls` / `internal/ytdl` | ffmpeg (HLS) and yt-dlp (streaming) backends |
+| `gui/` | Tauri app (vanilla HTML/JS/CSS front-end, zero JS libs) |
+| `extension/` | Chrome MV3 extension (TypeScript) |
+
+The Go side has **zero third-party module dependencies** — standard library
+only. External tools (`ffmpeg`, `yt-dlp`) are invoked as subprocesses.
+
+## Responsible use
+
+This is a general-purpose download manager. When it downloads from streaming
+sites via `yt-dlp`, **you are responsible** for respecting each site's terms of
+service and applicable copyright law — use it only for content you have the
+right to download (e.g. your own uploads, or material licensed for download).
+It does **not** circumvent DRM or access protected content.
+
+## License
+
+[MIT](LICENSE) © 2026 Gwani-28
+
+---
+
+## 한국어 요약
+
+**Mac DM** — 맥용 IDM 스타일 다운로드 매니저. 멀티 커넥션 분할 다운로드 · 이어받기 ·
+크롬 가로채기 · HLS/스트림 저장 · 유튜브(`yt-dlp`) 지원. CLI·GUI·크롬이 **하나의
+공유 데몬**을 함께 씁니다.
+
+**핵심 기능**: 분할 동시 다운로드(기본 8, Range 미지원 시 단일 폴백) · 어디서 끊겨도
+이어받기 · 커넥션별 진행률(IDM식, `dm show`) · 백그라운드 데몬 + 큐/동시성/속도제한 ·
+크롬 다운로드 자동 가로채기 · HLS(ffmpeg) · 유튜브 등 1000+ 사이트(yt-dlp, 화질 선택) ·
+카테고리 자동 분류.
+
+**설치**:
+
+```bash
+git clone https://github.com/Gwani-28/mac-dm.git
+cd mac-dm && ./scripts/install.sh
 ```
 
-## 비고
+이후 크롬에서 `chrome://extensions` → 개발자 모드 → "압축해제된 확장 프로그램을 로드"
+→ `extension/` 폴더. 제거는 `./scripts/uninstall.sh`.
 
-개인용. 코드서명·노타라이즈·앱스토어 배포는 목표가 아니다.
-DRM 우회/보호 콘텐츠는 다루지 않는다.
+**책임 있는 사용**: 스트리밍 사이트에서 받을 때는 각 사이트 약관과 저작권을 사용자가
+직접 확인해야 합니다. 받을 권리가 있는 콘텐츠에만 사용하세요. DRM 우회·보호 콘텐츠는
+다루지 않습니다.
+
+라이선스: [MIT](LICENSE).
